@@ -5,6 +5,7 @@ export const architectures: Architecture[] = [
     slug: "01-private-cdn",
     githubUrl: "https://github.com/Alfredo0607/private-cdn-architecture",
     demoUrl: undefined,
+    diagramImage: "/architectures/01-private-cdn/architecture.drawio.png",
     number: "01",
     title: "CDN Privada Segura",
     tagline:
@@ -209,14 +210,95 @@ export const architectures: Architecture[] = [
     ],
     snippets: [
       {
-        title: "Terraform — S3 Bucket privado con KMS",
+        title: "Terraform — main.tf completo",
         language: "hcl",
-        code: `resource "aws_s3_bucket" "assets" {
-  bucket = "my-private-assets-\${var.env}"
+        code: `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.45.0"
+    }
+  }
+
+  required_version = ">= 1.4.0"
+}
+
+provider "aws" {
+  region  = "us-east-1"
+  profile = "leader-developer-personal"
+}
+
+#################################################
+# VARIABLE
+#################################################
+
+variable "env" {
+  type = string
+}
+
+#################################################
+# DATA SOURCES
+#################################################
+
+data "aws_caller_identity" "current" {}
+
+#################################################
+# KMS KEY
+#################################################
+
+resource "aws_kms_key" "s3" {
+  description         = "KMS key for S3 encryption"
+  enable_key_rotation = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudFrontViaS3"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.cdn.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "s3" {
+  name          = "alias/s3-private-assets-\${var.env}"
+  target_key_id = aws_kms_key.s3.key_id
+}
+
+#################################################
+# S3 BUCKET
+#################################################
+
+resource "aws_s3_bucket" "assets" {
+  bucket = "my-private-assets-\${var.env}-2026-demo"
 }
 
 resource "aws_s3_bucket_public_access_block" "assets" {
-  bucket                  = aws_s3_bucket.assets.id
+  bucket = aws_s3_bucket.assets.id
+
   block_public_acls       = true
   ignore_public_acls      = true
   block_public_policy     = true
@@ -225,6 +307,7 @@ resource "aws_s3_bucket_public_access_block" "assets" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
   bucket = aws_s3_bucket.assets.id
+
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm     = "aws:kms"
@@ -234,32 +317,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
   }
 }
 
-resource "aws_s3_bucket_policy" "assets" {
-  bucket = aws_s3_bucket.assets.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "cloudfront.amazonaws.com" }
-      Action    = "s3:GetObject"
-      Resource  = "\${aws_s3_bucket.assets.arn}/*"
-      Condition = {
-        StringEquals = {
-          "AWS:SourceArn" = aws_cloudfront_distribution.cdn.arn
-        }
-      }
-    }]
-  })
-}`,
-      },
-      {
-        title: "Terraform — CloudFront con OAC y Signed URLs",
-        language: "hcl",
-        code: `resource "aws_cloudfront_origin_access_control" "oac" {
-  name                              = "s3-oac"
-  origin_access_control_origin_type = "s3"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
+#################################################
+# CLOUDFRONT PUBLIC KEY & KEY GROUP
+#################################################
+
+resource "aws_cloudfront_public_key" "main" {
+  name        = "cdn-public-key"
+  comment     = "Public key for signed URLs"
+  encoded_key = file("\${path.module}/public_key.pem")
 }
 
 resource "aws_cloudfront_key_group" "signed_urls" {
@@ -267,7 +332,28 @@ resource "aws_cloudfront_key_group" "signed_urls" {
   items = [aws_cloudfront_public_key.main.id]
 }
 
+#################################################
+# ORIGIN ACCESS CONTROL
+#################################################
+
+resource "aws_cloudfront_origin_access_control" "oac" {
+  name                              = "s3-oac"
+  description                       = "OAC for private S3 bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+#################################################
+# CLOUDFRONT DISTRIBUTION
+#################################################
+
 resource "aws_cloudfront_distribution" "cdn" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  default_root_object = "index.html"
+  price_class         = "PriceClass_100"
+
   origin {
     domain_name              = aws_s3_bucket.assets.bucket_regional_domain_name
     origin_id                = "s3-private-assets"
@@ -276,76 +362,90 @@ resource "aws_cloudfront_distribution" "cdn" {
 
   default_cache_behavior {
     target_origin_id       = "s3-private-assets"
-    viewer_protocol_policy = "https-only"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    trusted_key_groups     = [aws_cloudfront_key_group.signed_urls.id]
+    viewer_protocol_policy = "redirect-to-https"
+
+    allowed_methods = ["GET", "HEAD"]
+    cached_methods  = ["GET", "HEAD"]
+
+    trusted_key_groups = [aws_cloudfront_key_group.signed_urls.id]
 
     forwarded_values {
       query_string = false
-      cookies { forward = "none" }
+      cookies {
+        forward = "none"
+      }
     }
 
     min_ttl     = 0
-    default_ttl = 86400   # 1 day
-    max_ttl     = 604800  # 7 days
-  }
-
-  viewer_certificate {
-    acm_certificate_arn      = var.acm_cert_arn
-    ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
+    default_ttl = 86400
+    max_ttl     = 604800
   }
 
   restrictions {
-    geo_restriction { restriction_type = "none" }
+    geo_restriction {
+      restriction_type = "none"
+    }
   }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+#################################################
+# BUCKET POLICY
+#################################################
+
+resource "aws_s3_bucket_policy" "assets" {
+  depends_on = [
+    aws_s3_bucket_public_access_block.assets
+  ]
+
+  bucket = aws_s3_bucket.assets.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudFrontAccess"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = ["s3:GetObject"]
+        Resource = ["\${aws_s3_bucket.assets.arn}/*"]
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.cdn.arn
+          }
+        }
+      }
+    ]
+  })
 }`,
       },
       {
-        title: "Python — Generación de Signed URL",
-        language: "python",
-        code: `import boto3
-import datetime
-import rsa
-from botocore.signers import CloudFrontSigner
+        title: "NodeJS — Generación de Signed URL",
+        language: "nodejs",
+        code: `import { getSignedUrl } from '@aws-sdk/cloudfront-signer';
+import fs from 'fs';
+import { CLOUDFRONT_KEYPAIR_ID, CLOUDFRONT_PRIVATE_KEY } from '../../../config.js';
 
-def get_cloudfront_signer() -> CloudFrontSigner:
-    """Obtiene el key pair desde Secrets Manager y construye el signer."""
-    client = boto3.client("secretsmanager", region_name="us-east-1")
-    secret = client.get_secret_value(SecretId="cloudfront/private-key")
+async function firmarUrl(url, expiresInSeconds = 86400) {
+  console.info(CLOUDFRONT_PRIVATE_KEY);
 
-    private_key_bytes = secret["SecretString"].encode("utf-8")
-    key_id = "YOUR_KEY_PAIR_ID"  # guardado como env var o parámetro SSM
+  const signedUrl = await getSignedUrl({
+    url,
+    dateLessThan: new Date(Date.now() + expiresInSeconds * 1000),
+    privateKey: fs.readFileSync(CLOUDFRONT_PRIVATE_KEY),
+    keyPairId: CLOUDFRONT_KEYPAIR_ID,
+  });
 
-    def rsa_signer(message: bytes) -> bytes:
-        private_key = rsa.PrivateKey.load_pkcs1(private_key_bytes)
-        return rsa.sign(message, private_key, "SHA-1")
+  return signedUrl;
+}
 
-    return CloudFrontSigner(key_id, rsa_signer)
-
-
-def generate_signed_url(
-    object_key: str,
-    expiry_minutes: int = 15,
-    distribution_domain: str = "d1234example.cloudfront.net",
-) -> str:
-    """
-    Genera una Signed URL de CloudFront con expiración.
-
-    Args:
-        object_key: Path del objeto en S3 (ej: 'docs/contrato-123.pdf')
-        expiry_minutes: Tiempo de validez en minutos
-        distribution_domain: Dominio del CloudFront distribution
-
-    Returns:
-        URL firmada lista para entregar al cliente
-    """
-    signer = get_cloudfront_signer()
-    url = f"https://{distribution_domain}/{object_key}"
-    expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=expiry_minutes)
-
-    return signer.generate_presigned_url(url, date_less_than=expiry)`,
+export default firmarUrl;
+`,
       },
     ],
   },
