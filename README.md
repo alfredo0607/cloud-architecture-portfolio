@@ -192,6 +192,6 @@ GitHub → GitHub Actions → S3 + CloudFront
 
 _Construido con criterio arquitectónico, no solo con código._
 
-**Alfredo José Dominguez Hernández** · AWS Solutions Architect · 2025
+**Alfredo José Dominguez Hernández** · AWS Solutions Architect · 2026
 
 </div>
