@@ -14,15 +14,15 @@ export function Hero() {
         </div>
 
         <h1 className="text-6xl md:text-8xl font-bold text-foreground mb-6 leading-none tracking-tight">
-          Alfredo
+          Ingeniero Alfredo
           <br />
           <span className="text-aws">Dominguez</span>
         </h1>
 
         <p className="text-muted text-lg md:text-xl mb-10 leading-relaxed max-w-2xl mx-auto">
-          Diseño arquitecturas AWS escalables, seguras y costo-eficientes —
-          y construyo las aplicaciones que corren sobre ellas,
-          de extremo a extremo.
+          Diseño arquitecturas AWS escalables, seguras y costo-eficientes — y
+          construyo las aplicaciones que corren sobre ellas, de extremo a
+          extremo.
         </p>
 
         <div className="flex gap-4 justify-center flex-wrap mb-16">
