@@ -1,38 +1,5 @@
-type Architecture = {
-  number: string;
-  title: string;
-  problem: string;
-  solution: string;
-  services: string[];
-  status: "live" | "building";
-};
-
-const architectures: Architecture[] = [
-  {
-    number: "01",
-    title: "CDN Privada Segura",
-    problem: "Entregar archivos privados globalmente sin exponer S3 directamente.",
-    solution: "CloudFront + S3 con Signed URLs y Origin Access Control (OAC).",
-    services: ["CloudFront", "S3", "Signed URLs", "IAM", "KMS"],
-    status: "building",
-  },
-  {
-    number: "02",
-    title: "Backend Escalable con Contenedores",
-    problem: "Escalar APIs ante picos de tráfico sin intervención manual.",
-    solution: "ECS Fargate + ALB + Auto Scaling con rolling deployments.",
-    services: ["ECS Fargate", "ALB", "RDS PostgreSQL", "CloudWatch", "ECR"],
-    status: "building",
-  },
-  {
-    number: "03",
-    title: "Arquitectura Event-Driven",
-    problem: "Procesar tareas asíncronas de forma desacoplada y resiliente.",
-    solution: "Lambda + SQS + SNS + S3 Events con DLQ y retry automático.",
-    services: ["Lambda", "SQS", "SNS", "DynamoDB", "S3"],
-    status: "building",
-  },
-];
+import Link from "next/link";
+import { architectures } from "@/lib/data/architectures";
 
 export function Architectures() {
   return (
@@ -47,15 +14,16 @@ export function Architectures() {
           </h2>
           <p className="text-muted mt-4 max-w-xl">
             Cada arquitectura incluye diagrama técnico, decisiones documentadas
-            (ADRs), trade-offs y demo funcional desplegada en AWS.
+            (ADRs), trade-offs, estimación de costos y snippets de código reales.
           </p>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
           {architectures.map((arch) => (
-            <div
-              key={arch.number}
-              className="bg-surface border border-border-subtle rounded-xl p-6 flex flex-col gap-4 hover:border-aws/40 transition-colors"
+            <Link
+              key={arch.slug}
+              href={`/arquitecturas/${arch.slug}`}
+              className="bg-surface border border-border-subtle rounded-xl p-6 flex flex-col gap-4 hover:border-aws/40 hover:shadow-[0_0_20px_rgba(255,153,0,0.05)] transition-all group"
             >
               <div className="flex items-start justify-between">
                 <span className="font-mono text-aws text-3xl font-bold leading-none">
@@ -73,7 +41,7 @@ export function Architectures() {
               </div>
 
               <div>
-                <h3 className="text-lg font-semibold text-foreground mb-2">
+                <h3 className="text-lg font-semibold text-foreground mb-2 group-hover:text-aws transition-colors">
                   {arch.title}
                 </h3>
                 <p className="text-muted text-sm leading-relaxed">
@@ -87,16 +55,20 @@ export function Architectures() {
               </div>
 
               <div className="flex flex-wrap gap-2 mt-auto pt-2">
-                {arch.services.map((svc) => (
+                {arch.tags.slice(0, 5).map((tag) => (
                   <span
-                    key={svc}
+                    key={tag}
                     className="text-xs bg-background border border-border-subtle text-muted px-2 py-1 rounded font-mono"
                   >
-                    {svc}
+                    {tag}
                   </span>
                 ))}
               </div>
-            </div>
+
+              <span className="text-xs text-aws group-hover:underline font-mono mt-1">
+                Ver documentación completa →
+              </span>
+            </Link>
           ))}
         </div>
       </div>
