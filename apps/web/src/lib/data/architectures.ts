@@ -3,7 +3,7 @@ import type { Architecture } from "@/lib/types";
 export const architectures: Architecture[] = [
   {
     slug: "01-private-cdn",
-    githubUrl: "https://github.com/Alfredo0607/private-cdn-architecture",
+    githubUrl: "https://github.com/alfredo0607/aws-secure-content-distribution",
     demoUrl: undefined,
     diagramImage: "/architectures/01-private-cdn/architecture.drawio.png",
     number: "01",

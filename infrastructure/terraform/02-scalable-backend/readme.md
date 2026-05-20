@@ -8,9 +8,28 @@ Escalar APIs modernas de forma automática ante picos de tráfico sin intervenci
 
 ECS Fargate + Application Load Balancer + Auto Scaling con rolling deployments y observabilidad via CloudWatch.
 
-## Diagrama ()
+## Diagrama
 
-![Diagrama de arquitectura AWS](/architectures/02-scalable-backend/architecture-scalable-backend.png)
+```
+Internet
+  │
+  ▼
+Route 53
+  │
+  ▼
+Application Load Balancer
+  │        │
+  ▼        ▼
+ECS Task  ECS Task  (Fargate — autoscaling)
+  │
+  ▼
+RDS PostgreSQL (Multi-AZ)
+  │
+  ▼
+CloudWatch (métricas + logs + alarms)
+```
+
+> Diagrama detallado: `diagram.png` (pendiente)
 
 ## Servicios AWS
 
