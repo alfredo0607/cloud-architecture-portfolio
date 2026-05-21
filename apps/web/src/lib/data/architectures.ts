@@ -454,6 +454,8 @@ export default firmarUrl;
     slug: "02-scalable-backend",
     githubUrl: "https://github.com/Alfredo0607/scalable-backend-ecs",
     demoUrl: undefined,
+    diagramImage:
+      "/architectures/02-scalable-backend/architecture-scalable-backend.drawio.png",
     number: "02",
     title: "Backend Escalable con Contenedores",
     tagline:
@@ -685,124 +687,600 @@ export default firmarUrl;
       {
         title: "Dockerfile — Multi-stage build Node.js",
         language: "dockerfile",
-        code: `# Stage 1: Build
-FROM node:20-alpine AS builder
+        code: `# ── Stage 1: instalar dependencias de producción ──────────────────────────
+FROM node:22-slim AS deps
+
+RUN corepack enable
+
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
 
-# Stage 2: Production runner (imagen mínima)
-FROM node:20-alpine AS runner
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# sharp descarga binarios precompilados para linux/x64 automáticamente
+RUN pnpm install --frozen-lockfile --prod
+
+# ── Stage 2: imagen final mínima ──────────────────────────────────────────
+FROM node:22-slim
+
+RUN groupadd -r app && useradd -r -g app app
+
 WORKDIR /app
-ENV NODE_ENV=production
 
-# Solo las dependencias de producción
-COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+COPY --from=deps /app/node_modules ./node_modules
+COPY src/            ./src/
+COPY config.js       ./
+COPY package.json    ./
 
-# Copiar el build
-COPY --from=builder /app/dist ./dist
-
-# Non-root user por seguridad
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
-USER nodejs
+USER app
 
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \\
-  CMD wget -qO- http://localhost:3000/health || exit 1
 
-CMD ["node", "dist/index.js"]`,
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
+CMD ["node", "src/server.js"]
+`,
       },
       {
-        title: "Terraform — ECS Task Definition + Service",
+        title: "Terraform — main.tf completo",
         language: "hcl",
-        code: `resource "aws_ecs_task_definition" "api" {
-  family                   = "portfolio-api"
+        code: `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.45.0"
+    }
+  }
+
+  required_version = ">= 1.4.0"
+}
+
+provider "aws" {
+  region  = "us-east-1"
+  profile = "leader-developer-personal"
+}
+
+#################################################
+# VARIABLES
+#################################################
+
+variable "env" {
+  type = string
+}
+
+variable "app_image" {
+  type        = string
+  description = "URI de imagen ECR: 123456789.dkr.ecr.us-east-1.amazonaws.com/backend-dev:latest"
+}
+
+variable "app_port" {
+  type    = number
+  default = 3000
+}
+
+variable "cors_origin" {
+  type        = string
+  description = "URL del frontend permitido en CORS (ej: https://tuapp.com)"
+}
+
+variable "aws_bucket_name" {
+  type        = string
+  description = "Nombre del bucket S3 de la Arquitectura 01 (CDN)"
+}
+
+variable "cloudfront_domain" {
+  type        = string
+  description = "Dominio CloudFront de la Arquitectura 01 (ej: https://xxxx.cloudfront.net)"
+}
+
+variable "cloudfront_keypair_id" {
+  type        = string
+  description = "ID del key pair de CloudFront (APKA...)"
+}
+
+variable "cloudfront_private_key" {
+  type        = string
+  sensitive   = true
+  description = "Contenido PEM de la private key de CloudFront"
+}
+
+variable "jwt_secret" {
+  type      = string
+  sensitive = true
+}
+
+variable "jwt_refresh_secret" {
+  type      = string
+  sensitive = true
+}
+
+variable "cpu_scaling_target" {
+  type    = number
+  default = 60
+}
+
+#################################################
+# DATA SOURCES
+#################################################
+
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+data "aws_s3_bucket" "assets" {
+  bucket = var.aws_bucket_name
+}
+
+#################################################
+# VPC
+#################################################
+
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = { Name = "vpc-backend-\${var.env}" }
+}
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = { Name = "igw-backend-\${var.env}" }
+}
+
+resource "aws_subnet" "public" {
+  count             = 2
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.\${count.index + 1}.0/24"
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+
+  tags = { Name = "subnet-public-\${count.index + 1}-\${var.env}" }
+}
+
+resource "aws_subnet" "private" {
+  count             = 2
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.\${count.index + 3}.0/24"
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+
+  tags = { Name = "subnet-private-\${count.index + 1}-\${var.env}" }
+}
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = { Name = "eip-nat-\${var.env}" }
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  depends_on = [aws_internet_gateway.main]
+
+  tags = { Name = "nat-backend-\${var.env}" }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = { Name = "rt-public-\${var.env}" }
+}
+
+resource "aws_route_table_association" "public" {
+  count          = 2
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main.id
+  }
+
+  tags = { Name = "rt-private-\${var.env}" }
+}
+
+resource "aws_route_table_association" "private" {
+  count          = 2
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private.id
+}
+
+#################################################
+# SECURITY GROUPS
+#################################################
+
+resource "aws_security_group" "alb" {
+  name        = "alb-sg-\${var.env}"
+  description = "ALB: HTTP desde internet"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "alb-sg-\${var.env}" }
+}
+
+resource "aws_security_group" "ecs" {
+  name        = "ecs-sg-\${var.env}"
+  description = "ECS tasks: traffic only from ALB"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = var.app_port
+    to_port         = var.app_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "ecs-sg-\${var.env}" }
+}
+
+#################################################
+# ECR
+#################################################
+
+resource "aws_ecr_repository" "backend" {
+  name                 = "backend-\${var.env}"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "backend" {
+  repository = aws_ecr_repository.backend.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Mantener últimas 10 imágenes"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 10
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
+#################################################
+# SECRETS MANAGER
+#################################################
+
+resource "aws_secretsmanager_secret" "app" {
+  name                    = "backend-secrets-\${var.env}"
+  description             = "JWT secrets y CloudFront private key del backend"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "app" {
+  secret_id = aws_secretsmanager_secret.app.id
+
+  secret_string = jsonencode({
+    JWT_SECRET             = var.jwt_secret
+    JWT_REFRESH_SECRET     = var.jwt_refresh_secret
+    CLOUDFRONT_KEYPAIR_ID  = var.cloudfront_keypair_id
+    CLOUDFRONT_PRIVATE_KEY = var.cloudfront_private_key
+  })
+}
+
+#################################################
+# IAM — Execution Role
+#################################################
+
+resource "aws_iam_role" "ecs_execution" {
+  name = "ecs-execution-role-backend-\${var.env}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_managed" {
+  role       = aws_iam_role.ecs_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  name = "ecs-secrets-access-\${var.env}"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = aws_secretsmanager_secret.app.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt", "kms:DescribeKey"]
+        Resource = "arn:aws:kms:us-east-1:578209355877:key/da2f5da6-2e70-40a0-88f1-e49baf700989"
+      }
+    ]
+  })
+}
+
+#################################################
+# IAM — Task Role
+#################################################
+
+resource "aws_iam_role" "ecs_task" {
+  name = "ecs-task-role-backend-\${var.env}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_task_s3" {
+  name = "ecs-task-s3-\${var.env}"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
+        Resource = "\${data.aws_s3_bucket.assets.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = data.aws_s3_bucket.assets.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt", "kms:DescribeKey"]
+        Resource = "arn:aws:kms:us-east-1:578209355877:key/da2f5da6-2e70-40a0-88f1-e49baf700989"
+      }
+    ]
+  })
+}
+
+#################################################
+# CLOUDWATCH — Log Group
+#################################################
+
+resource "aws_cloudwatch_log_group" "ecs" {
+  name              = "/ecs/backend-\${var.env}"
+  retention_in_days = 7
+}
+
+#################################################
+# ECS CLUSTER
+#################################################
+
+resource "aws_ecs_cluster" "main" {
+  name = "cluster-backend-\${var.env}"
+
+  configuration {
+    execute_command_configuration {
+      logging = "OVERRIDE"
+      log_configuration {
+        cloud_watch_log_group_name = aws_cloudwatch_log_group.ecs.name
+      }
+    }
+  }
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+}
+
+#################################################
+# ECS TASK DEFINITION
+#################################################
+
+resource "aws_ecs_task_definition" "backend" {
+  family                   = "backend-\${var.env}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"    # 0.5 vCPU
-  memory                   = "1024"   # 1 GB
+  cpu                      = "512"
+  memory                   = "1024"
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([{
-    name      = "api"
-    image     = "\${aws_ecr_repository.api.repository_url}:latest"
-    essential = true
+    name  = "backend"
+    image = var.app_image
 
     portMappings = [{
-      containerPort = 3000
+      containerPort = var.app_port
       protocol      = "tcp"
     }]
 
-    secrets = [{
-      name      = "DATABASE_URL"
-      valueFrom = aws_secretsmanager_secret.db_url.arn
-    }]
+    secrets = [
+      { name = "JWT_SECRET",             valueFrom = "\${aws_secretsmanager_secret.app.arn}:JWT_SECRET::" },
+      { name = "JWT_REFRESH_SECRET",     valueFrom = "\${aws_secretsmanager_secret.app.arn}:JWT_REFRESH_SECRET::" },
+      { name = "CLOUDFRONT_KEYPAIR_ID",  valueFrom = "\${aws_secretsmanager_secret.app.arn}:CLOUDFRONT_KEYPAIR_ID::" },
+      { name = "CLOUDFRONT_PRIVATE_KEY", valueFrom = "\${aws_secretsmanager_secret.app.arn}:CLOUDFRONT_PRIVATE_KEY::" },
+    ]
+
+    environment = [
+      { name = "NODE_ENV",               value = "production" },
+      { name = "PORT",                   value = tostring(var.app_port) },
+      { name = "API_PREFIX",             value = "/api/v1" },
+      { name = "CORS_ORIGIN",            value = var.cors_origin },
+      { name = "AWS_REGION",             value = data.aws_region.current.name },
+      { name = "AWS_BUCKET_NAME",        value = var.aws_bucket_name },
+      { name = "CLOUDFRONT_DOMAIN",      value = var.cloudfront_domain },
+      { name = "RATE_LIMIT_WINDOW_MS",   value = "900000" },
+      { name = "RATE_LIMIT_MAX",         value = "100" },
+      { name = "LOG_LEVEL",              value = "combined" },
+    ]
 
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        awslogs-group         = "/ecs/portfolio-api"
-        awslogs-region        = var.aws_region
-        awslogs-stream-prefix = "ecs"
+        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+        "awslogs-region"        = data.aws_region.current.name
+        "awslogs-stream-prefix" = "backend"
       }
     }
 
     healthCheck = {
-      command     = ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      command     = ["CMD-SHELL", "node -e \"require('http').get('http://localhost:\${var.app_port}/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval    = 30
       timeout     = 5
       retries     = 3
-      startPeriod = 10
+      startPeriod = 60
     }
   }])
 }
 
-resource "aws_ecs_service" "api" {
-  name            = "portfolio-api"
+#################################################
+# APPLICATION LOAD BALANCER
+#################################################
+
+resource "aws_lb" "main" {
+  name               = "alb-backend-\${var.env}"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = aws_subnet.public[*].id
+
+  enable_deletion_protection = false
+
+  tags = { Name = "alb-backend-\${var.env}" }
+}
+
+resource "aws_lb_target_group" "backend" {
+  name        = "tg-backend-\${var.env}"
+  port        = var.app_port
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    matcher             = "200"
+  }
+
+  deregistration_delay = 30
+
+  tags = { Name = "tg-backend-\${var.env}" }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+}
+
+#################################################
+# ECS SERVICE
+#################################################
+
+resource "aws_ecs_service" "backend" {
+  name            = "backend-service-\${var.env}"
   cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.api.arn
+  task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = 2
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = var.private_subnet_ids
-    security_groups  = [aws_security_group.ecs_tasks.id]
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.ecs.id]
     assign_public_ip = false
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.api.arn
-    container_name   = "api"
-    container_port   = 3000
+    target_group_arn = aws_lb_target_group.backend.arn
+    container_name   = "backend"
+    container_port   = var.app_port
   }
+
+  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 200
 
   deployment_circuit_breaker {
     enable   = true
     rollback = true
   }
 
-  deployment_controller {
-    type = "ECS"
+  depends_on = [aws_lb_listener.http]
+
+  lifecycle {
+    ignore_changes = [task_definition, desired_count]
   }
-}`,
-      },
-      {
-        title: "Terraform — Target Tracking Auto Scaling",
-        language: "hcl",
-        code: `resource "aws_appautoscaling_target" "ecs" {
+}
+
+#################################################
+# AUTO SCALING
+#################################################
+
+resource "aws_appautoscaling_target" "ecs" {
   max_capacity       = 10
-  min_capacity       = 1
-  resource_id        = "service/\${aws_ecs_cluster.main.name}/\${aws_ecs_service.api.name}"
+  min_capacity       = 2
+  resource_id        = "service/\${aws_ecs_cluster.main.name}/\${aws_ecs_service.backend.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
 }
 
-resource "aws_appautoscaling_policy" "cpu_tracking" {
-  name               = "cpu-target-tracking"
+resource "aws_appautoscaling_policy" "cpu" {
+  name               = "cpu-tracking-backend-\${var.env}"
   policy_type        = "TargetTrackingScaling"
   resource_id        = aws_appautoscaling_target.ecs.resource_id
   scalable_dimension = aws_appautoscaling_target.ecs.scalable_dimension
@@ -812,10 +1290,131 @@ resource "aws_appautoscaling_policy" "cpu_tracking" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
-    target_value       = 60.0  # Mantener CPU en 60%
-    scale_in_cooldown  = 300   # 5 min antes de scale-in (conservador)
-    scale_out_cooldown = 60    # 1 min para escalar rápido ante picos
+    target_value       = var.cpu_scaling_target
+    scale_out_cooldown = 60
+    scale_in_cooldown  = 300
   }
+}
+
+#################################################
+# CLOUDWATCH — Alarmas
+#################################################
+
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  alarm_name          = "ecs-cpu-high-backend-\${var.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "CPU del backend > 80% por 2 minutos"
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.main.name
+    ServiceName = aws_ecs_service.backend.name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "unhealthy_hosts" {
+  alarm_name          = "alb-unhealthy-hosts-backend-\${var.env}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 0
+  alarm_description   = "Hay containers no saludables detrás del ALB"
+
+  dimensions = {
+    LoadBalancer = aws_lb.main.arn_suffix
+    TargetGroup  = aws_lb_target_group.backend.arn_suffix
+  }
+}
+
+#################################################
+# CLOUDWATCH — Dashboard
+#################################################
+
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "backend-\${var.env}"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type = "metric" x = 0  y = 0  width = 12 height = 6
+        properties = {
+          region  = "us-east-1"
+          title   = "ECS CPU Utilization (%)"
+          period  = 60
+          stat    = "Average"
+          view    = "timeSeries"
+          metrics = [["AWS/ECS", "CPUUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.backend.name]]
+        }
+      },
+      {
+        type = "metric" x = 12 y = 0  width = 12 height = 6
+        properties = {
+          region  = "us-east-1"
+          title   = "ECS Memory Utilization (%)"
+          period  = 60
+          stat    = "Average"
+          view    = "timeSeries"
+          metrics = [["AWS/ECS", "MemoryUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.backend.name]]
+        }
+      },
+      {
+        type = "metric" x = 0  y = 6  width = 12 height = 6
+        properties = {
+          region  = "us-east-1"
+          title   = "ALB Request Count"
+          period  = 60
+          stat    = "Sum"
+          view    = "timeSeries"
+          metrics = [["AWS/ApplicationELB", "RequestCount", "LoadBalancer", aws_lb.main.arn_suffix]]
+        }
+      },
+      {
+        type = "metric" x = 12 y = 6  width = 12 height = 6
+        properties = {
+          region  = "us-east-1"
+          title   = "ALB Target Response Time (s)"
+          period  = 60
+          stat    = "Average"
+          view    = "timeSeries"
+          metrics = [["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.main.arn_suffix]]
+        }
+      }
+    ]
+  })
+}
+
+#################################################
+# OUTPUTS
+#################################################
+
+output "api_endpoint" {
+  description = "Endpoint público del backend"
+  value       = "http://\${aws_lb.main.dns_name}"
+}
+
+output "ecr_repository_url" {
+  description = "URL del repositorio ECR para push de imágenes"
+  value       = aws_ecr_repository.backend.repository_url
+}
+
+output "ecs_cluster_name" {
+  value = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_name" {
+  value = aws_ecs_service.backend.name
+}
+
+output "cloudwatch_dashboard_url" {
+  value = "https://console.aws.amazon.com/cloudwatch/home?region=\${data.aws_region.current.name}#dashboards:name=\${aws_cloudwatch_dashboard.main.dashboard_name}"
 }`,
       },
     ],
@@ -823,7 +1422,8 @@ resource "aws_appautoscaling_policy" "cpu_tracking" {
 
   {
     slug: "03-event-driven-serverless",
-    githubUrl: "https://github.com/Alfredo0607/event-driven-serverless",
+    githubUrl:
+      "https://github.com/alfredo0607/aws-event-driven-image-processing-platform",
     demoUrl: undefined,
     number: "03",
     title: "Arquitectura Event-Driven Serverless",
@@ -1036,20 +1636,42 @@ resource "aws_appautoscaling_policy" "cpu_tracking" {
       {
         title: "Python — Lambda Handler completo",
         language: "python",
-        code: `import json
+        code: `Lambda function: procesa imágenes de S3 disparadas por eventos SQS.
+
+Flujo:
+  S3 ObjectCreated → SQS → este handler → 3 versiones en S3 + DynamoDB + SNS
+
+Implementa:
+  - ReportBatchItemFailures: solo reintenta mensajes fallidos del batch
+  - Idempotencia via DynamoDB: evita doble procesamiento si el evento llega dos veces
+  - S3 TestEvent: ignora eventos de prueba enviados al configurar notificaciones
+"""
+
 import boto3
-import os
+import datetime
 import io
-from datetime import datetime, timezone
+import json
+import os
+import time
+import urllib.parse
+
 from PIL import Image
 
-s3 = boto3.client("s3")
-dynamodb = boto3.resource("dynamodb")
-sns = boto3.client("sns")
+# ── Clientes AWS ──────────────────────────────────────────────────────────────
 
-OUTPUT_BUCKET = os.environ["OUTPUT_BUCKET"]
-TABLE_NAME = os.environ["DYNAMODB_TABLE"]
-SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
+s3_client  = boto3.client("s3")
+dynamodb   = boto3.resource("dynamodb")
+sns_client = boto3.client("sns")
+
+# ── Variables de entorno ──────────────────────────────────────────────────────
+
+BUCKET_NAME    = os.environ["BUCKET_NAME"]
+TABLE_NAME     = os.environ["DYNAMODB_TABLE"]
+SNS_TOPIC_ARN  = os.environ["SNS_TOPIC_ARN"]
+RESIZED_PREFIX = os.environ.get("RESIZED_PREFIX", "image-resize/resized")
+ENVIRONMENT    = os.environ.get("ENVIRONMENT", "dev")
+
+# ── Configuración de resizing ─────────────────────────────────────────────────
 
 SIZES = [
     ("800x600", 800, 600),
@@ -1057,123 +1679,671 @@ SIZES = [
     ("150x150", 150, 150),
 ]
 
+FORMAT_MAP = {
+    "jpg":  "JPEG",
+    "jpeg": "JPEG",
+    "png":  "PNG",
+    "gif":  "GIF",
+    "webp": "WEBP",
+    "svg":  "PNG",   # Pillow no soporta SVG → convierte a PNG
+}
 
-def handler(event, context):
-    """
-    Event Source Mapping desde SQS.
-    Cada record del batch es un mensaje SQS que contiene un S3 event.
-    Retorna batch item failures para partial batch response.
-    """
-    failures = []
 
-    for record in event["Records"]:
+# ── Handler principal ─────────────────────────────────────────────────────────
+
+def lambda_handler(event, context):
+    """
+    Punto de entrada. Itera sobre los registros SQS del batch.
+    Retorna batchItemFailures para que SQS reintente solo los mensajes fallidos.
+    """
+    failed = []
+
+    for record in event.get("Records", []):
+        message_id = record["messageId"]
         try:
-            process_record(record)
+            _process_sqs_record(record)
         except Exception as exc:
-            print(f"ERROR processing {record['messageId']}: {exc}")
-            failures.append({"itemIdentifier": record["messageId"]})
+            print(f"[ERROR] messageId={message_id}: {exc}")
+            failed.append({"itemIdentifier": message_id})
 
-    # Partial batch response: solo reintenta los mensajes que fallaron
-    return {"batchItemFailures": failures}
+    return {"batchItemFailures": failed}
 
 
-def process_record(record: dict) -> None:
+# ── Procesamiento de un registro SQS ─────────────────────────────────────────
+
+def _process_sqs_record(record: dict) -> None:
     body = json.loads(record["body"])
-    s3_event = body["Records"][0]["s3"]
-    bucket = s3_event["bucket"]["name"]
-    key = s3_event["object"]["key"]
 
-    # Descarga la imagen original desde S3
-    response = s3.get_object(Bucket=bucket, Key=key)
-    image_bytes = response["Body"].read()
-    image = Image.open(io.BytesIO(image_bytes))
+    # S3 envía un evento de prueba al configurar la notificación → ignorar
+    if body.get("Event") == "s3:TestEvent":
+        print("[INFO] S3 test event recibido, ignorando.")
+        return
 
-    original_size = image.size
-    original_format = image.format or "JPEG"
-    output_keys = []
+    for s3_record in body.get("Records", []):
+        bucket = s3_record["s3"]["bucket"]["name"]
+        key    = urllib.parse.unquote_plus(s3_record["s3"]["object"]["key"])
+        size   = s3_record["s3"]["object"].get("size", 0)
+        _process_image(bucket, key, size)
 
-    # Genera cada variante de tamaño
-    for label, width, height in SIZES:
-        resized = image.copy()
-        resized.thumbnail((width, height), Image.LANCZOS)
 
-        buffer = io.BytesIO()
-        resized.save(buffer, format=original_format, quality=85, optimize=True)
-        buffer.seek(0)
+# ── Procesamiento de una imagen ───────────────────────────────────────────────
 
-        output_key = f"resized/{label}/{key}"
-        s3.put_object(
-            Bucket=OUTPUT_BUCKET,
-            Key=output_key,
-            Body=buffer,
-            ContentType=f"image/{original_format.lower()}",
-        )
-        output_keys.append(output_key)
-
-    # Persiste metadata en DynamoDB
+def _process_image(bucket: str, key: str, file_size: int) -> None:
     table = dynamodb.Table(TABLE_NAME)
+
+    # Idempotencia: si ya fue procesada, salir sin hacer nada
+    existing = table.get_item(Key={"imageId": key})
+    if existing.get("Item", {}).get("status") == "processed":
+        print(f"[INFO] Ya procesada (idempotente): {key}")
+        return
+
+    print(f"[INFO] Procesando: {key} ({file_size} bytes)")
+
+    # Descargar imagen de S3
+    response     = s3_client.get_object(Bucket=bucket, Key=key)
+    image_data   = response["Body"].read()
+    content_type = response.get("ContentType", "image/jpeg")
+
+    img = Image.open(io.BytesIO(image_data))
+    original_w, original_h = img.size
+
+    ext      = key.rsplit(".", 1)[-1].lower()
+    base     = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    fmt      = FORMAT_MAP.get(ext, "JPEG")
+    out_ext  = "png" if ext == "svg" else ext
+    out_mime = "image/png" if ext == "svg" else content_type
+
+    # Generar las 3 versiones redimensionadas
+    generated_keys = []
+    for label, max_w, max_h in SIZES:
+        resized = img.copy()
+        resized.thumbnail((max_w, max_h), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        save_kwargs = {"format": fmt}
+        if fmt == "JPEG":
+            save_kwargs["quality"] = 85
+            save_kwargs["optimize"] = True
+        resized.save(buf, **save_kwargs)
+        buf.seek(0)
+
+        output_key = f"{RESIZED_PREFIX}/{label}/{base}.{out_ext}"
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=output_key,
+            Body=buf.getvalue(),
+            ContentType=out_mime,
+            ContentDisposition="inline",
+        )
+        generated_keys.append(output_key)
+        print(f"[INFO] Subida: {output_key}")
+
+    now_iso  = datetime.datetime.utcnow().isoformat() + "Z"
+    ttl_unix = int(time.time()) + 90 * 24 * 3600  # expira en 90 días
+
+    # Persistir metadata en DynamoDB
     table.put_item(
         Item={
-            "imageId": key,
-            "status": "processed",
-            "originalBucket": bucket,
-            "outputKeys": output_keys,
-            "originalDimensions": list(original_size),
-            "format": original_format,
-            "processedAt": datetime.now(timezone.utc).isoformat(),
-            "requestId": context.aws_request_id,
+            "imageId":    key,
+            "status":     "processed",
+            "sizes":      generated_keys,
+            "originalKey": key,
+            "fileSize":   file_size,
+            "mimeType":   content_type,
+            "dimensions": f"{original_w}x{original_h}",
+            "processedAt": now_iso,
+            "expiresAt":  ttl_unix,
+            "environment": ENVIRONMENT,
         }
     )
 
-    # Notifica via SNS
-    sns.publish(
+    # Notificar vía SNS
+    sns_client.publish(
         TopicArn=SNS_TOPIC_ARN,
-        Message=json.dumps({"imageId": key, "status": "processed", "sizes": output_keys}),
-        Subject="Image processing complete",
-    )`,
+        Subject=f"✅ Tus imágenes ya están listas",
+        Message=json.dumps(
+            {
+                "title": "Imágenes procesadas correctamente",
+                "message": (
+                    f"Hola 👋\n\n"
+                    f"Tu imagen '{base}' fue procesada exitosamente y ya se "
+                    f"encuentran disponibles las versiones optimizadas.\n\n"
+                    f"📐 Tamaño original: {original_w}x{original_h}\n"
+                    f"🖼️ Versiones generadas: {len(generated_keys)}\n"
+                    f"📦 Tamaño del archivo: {file_size} bytes\n\n"
+                    f"Gracias por usar nuestro servicio 🚀"
+                ),
+                "imageId": key,
+                "sizes": generated_keys,
+                "processedAt": now_iso,
+                "environment": ENVIRONMENT,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+
+    print(f"[INFO] Completado: {key} → {generated_keys}")`,
       },
+
       {
-        title: "Terraform — SQS + DLQ + Lambda Event Source Mapping",
-        language: "hcl",
-        code: `resource "aws_sqs_queue" "dlq" {
-  name                      = "image-processing-dlq"
-  message_retention_seconds = 1209600  # 14 días
+        title: "Main.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+  }
+
+  required_version = ">= 1.4.0"
 }
 
-resource "aws_sqs_queue" "image_processing" {
-  name                       = "image-processing-queue"
-  visibility_timeout_seconds = 360   # 6x el timeout de Lambda (60s)
-  message_retention_seconds  = 86400 # 24 horas
+provider "aws" {
+  region  = var.aws_region
+  profile = var.aws_profile
+}
+
+# ── Data sources ──────────────────────────────────────────────────────────────
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# ── Locals: naming & tags aplicados a todos los recursos ─────────────────────
+
+locals {
+  prefix = "img-proc-env"
+
+  tags = {
+    Project      = "aws-event-driven-image-processing-platform"
+    Architecture = "event-driven-serverless"
+    Environment  = var.env
+    ManagedBy    = "terraform"
+    Owner        = "Alfredo Jose Dominguez Hernandez"
+    Repository   = "aws-event-driven-image-processing-platform"
+  }
+}
+`,
+      },
+
+      {
+        title: "s3.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# S3 BUCKET — almacenamiento de imágenes input/output
+#################################################
+
+resource "aws_s3_bucket" "images" {
+  # Nombre único por cuenta y entorno
+  bucket = "{local.prefix}-images-{data.aws_caller_identity.current.account_id}"
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-images"
+    Purpose = "image-storage-input-output"
+  })
+}
+
+resource "aws_s3_bucket_public_access_block" "images" {
+  bucket = aws_s3_bucket.images.id
+
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "images" {
+  bucket = aws_s3_bucket.images.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "images" {
+  bucket = aws_s3_bucket.images.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "images" {
+  bucket = aws_s3_bucket.images.id
+
+  rule {
+    id     = "expire-input-originals"
+    status = "Enabled"
+
+    filter {
+      prefix = "image-resize/input/"
+    }
+
+    expiration {
+      days = 7
+    }
+  }
+
+  rule {
+    id     = "expire-resized-outputs"
+    status = "Enabled"
+
+    filter {
+      prefix = "image-resize/resized/"
+    }
+
+    expiration {
+      days = 90
+    }
+  }
+}
+
+#################################################
+# S3 EVENT NOTIFICATION → SQS
+# Dispara cuando se sube un objeto a image-resize/input/
+# depends_on: la política de SQS debe existir primero para que AWS
+# pueda validar que S3 tiene permiso de escribir en la cola.
+#################################################
+
+resource "aws_s3_bucket_notification" "images" {
+  depends_on = [aws_sqs_queue_policy.processing]
+
+  bucket = aws_s3_bucket.images.id
+
+  queue {
+    queue_arn     = aws_sqs_queue.processing.arn
+    events        = ["s3:ObjectCreated:*"]
+    filter_prefix = "image-resize/input/"
+  }
+}`,
+      },
+
+      {
+        title: "SNS.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# SNS TOPIC — notificaciones del pipeline
+# Lambda publica aquí tras procesar o fallar.
+# Suscriptores opcionales: email, webhook, otra Lambda.
+#################################################
+
+resource "aws_sns_topic" "notifications" {
+  name = "{local.prefix}-notifications"
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-notifications"
+    Purpose = "processing-notifications"
+  })
+}
+
+# Suscripción por email (opcional — solo si notification_email != "")
+# AWS enviará un correo de confirmación; debe aceptarse manualmente.
+resource "aws_sns_topic_subscription" "email" {
+  count = var.notification_email != "" ? 1 : 0
+
+  topic_arn = aws_sns_topic.notifications.arn
+  protocol  = "email"
+  endpoint  = var.notification_email
+}
+`,
+      },
+
+      {
+        title: "SQS.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# SQS DEAD-LETTER QUEUE
+# Recibe mensajes que fallaron 3 veces consecutivas.
+# Retención máxima (14 días) para dar tiempo al equipo de revisar.
+#################################################
+
+resource "aws_sqs_queue" "dlq" {
+  name = "{local.prefix}-dlq"
+
+  message_retention_seconds = 1209600 # 14 días (máximo)
+  sqs_managed_sse_enabled   = true
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-dlq"
+    Purpose = "dead-letter-queue"
+  })
+}
+
+#################################################
+# SQS PROCESSING QUEUE
+# Buffer entre el evento S3 y la ejecución de Lambda.
+# VisibilityTimeout = 6× el timeout de Lambda (best practice AWS).
+# MaxReceiveCount = 3: tras 3 fallos el mensaje pasa a la DLQ.
+#################################################
+
+resource "aws_sqs_queue" "processing" {
+  name = "{local.prefix}-processing"
+
+  # 6× lambda_timeout: mientras Lambda procesa, SQS oculta el mensaje
+  visibility_timeout_seconds = var.lambda_timeout * 6
+
+  message_retention_seconds = 86400 # 1 día
+  sqs_managed_sse_enabled   = true
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq.arn
     maxReceiveCount     = 3
   })
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-processing"
+    Purpose = "image-processing-queue"
+  })
 }
 
-# S3 envía eventos a SQS
-resource "aws_s3_bucket_notification" "uploads" {
-  bucket = aws_s3_bucket.input.id
+#################################################
+# SQS QUEUE POLICY
+# Permite que Amazon S3 publique mensajes en la cola.
+# La condición aws:SourceArn restringe el acceso al bucket concreto,
+# evitando el confused deputy problem.
+#################################################
 
-  queue {
-    queue_arn     = aws_sqs_queue.image_processing.arn
-    events        = ["s3:ObjectCreated:*"]
-    filter_suffix = ".jpg"  # solo imágenes JPEG
+resource "aws_sqs_queue_policy" "processing" {
+  queue_url = aws_sqs_queue.processing.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowS3SendMessage"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action   = "sqs:SendMessage"
+        Resource = aws_sqs_queue.processing.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_s3_bucket.images.arn
+          }
+        }
+      }
+    ]
+  })
+}
+`,
+      },
+
+      {
+        title: "lambda.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# BUILD AUTOMÁTICO DEL PAQUETE LAMBDA
+# Se ejecuta en terraform apply cuando handler.py o
+# requirements.txt cambian. Instala Pillow compilado para
+# Linux x86_64 (manylinux) dentro de lambda/package/.
+#################################################
+
+resource "null_resource" "lambda_build" {
+  triggers = {
+    handler_md5      = filemd5("{path.module}/lambda/handler.py")
+    requirements_md5 = filemd5("{path.module}/lambda/requirements.txt")
+  }
+
+  provisioner "local-exec" {
+    command     = "python build.py"
+    working_dir = path.module
   }
 }
 
-# Lambda consume SQS
-resource "aws_lambda_event_source_mapping" "sqs_trigger" {
-  event_source_arn                   = aws_sqs_queue.image_processing.arn
-  function_name                      = aws_lambda_function.image_processor.arn
-  batch_size                         = 10
-  maximum_batching_window_in_seconds = 5
-  function_response_types            = ["ReportBatchItemFailures"]
+#################################################
+# LAMBDA DEPLOYMENT PACKAGE
+# archive_file depende de null_resource para asegurar que
+# lambda/package/ ya existe antes de ser empaquetado.
+#################################################
+
+data "archive_file" "lambda" {
+  depends_on = [null_resource.lambda_build]
+
+  type        = "zip"
+  source_dir  = "{path.module}/lambda/package"
+  output_path = "{path.module}/.build/handler.zip"
 }
 
-# Alarma si hay mensajes en DLQ
+#################################################
+# LAMBDA FUNCTION — procesamiento de imágenes
+# Runtime: Python 3.12
+# Timeout: var.lambda_timeout (default 60 s)
+# Memory: var.lambda_memory_mb (default 512 MB)
+# reserved_concurrent_executions: -1 = sin reserva,
+#   usa el pool general de la cuenta (correcto para dev).
+#   En producción cambiar a 50+ en terraform.tfvars.
+#################################################
+
+resource "aws_lambda_function" "image_processor" {
+  function_name = "{local.prefix}-processor"
+  role          = aws_iam_role.lambda.arn
+
+  handler     = "handler.lambda_handler"
+  runtime     = "python3.12"
+  timeout     = var.lambda_timeout
+  memory_size = var.lambda_memory_mb
+
+  reserved_concurrent_executions = var.lambda_reserved_concurrency
+
+  filename         = data.archive_file.lambda.output_path
+  source_code_hash = data.archive_file.lambda.output_base64sha256
+
+  environment {
+    variables = {
+      BUCKET_NAME    = aws_s3_bucket.images.bucket
+      DYNAMODB_TABLE = aws_dynamodb_table.images.name
+      SNS_TOPIC_ARN  = aws_sns_topic.notifications.arn
+      RESIZED_PREFIX = "image-resize/resized"
+      ENVIRONMENT    = var.env
+    }
+  }
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-processor"
+    Purpose = "image-processing-function"
+  })
+}
+
+#################################################
+# EVENT SOURCE MAPPING — SQS → Lambda
+# batch_size: hasta 10 mensajes por invocación
+# ReportBatchItemFailures: solo reintenta mensajes
+#   fallidos del batch, no el batch completo
+#################################################
+
+resource "aws_lambda_event_source_mapping" "sqs_trigger" {
+  event_source_arn = aws_sqs_queue.processing.arn
+  function_name    = aws_lambda_function.image_processor.arn
+
+  batch_size = var.sqs_batch_size
+
+  function_response_types = ["ReportBatchItemFailures"]
+}`,
+      },
+
+      {
+        title: "IAM.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# IAM ROLE — ejecución de Lambda
+#################################################
+
+resource "aws_iam_role" "lambda" {
+  name = "{local.prefix}-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowLambdaAssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-lambda-role"
+    Purpose = "lambda-execution-role"
+  })
+}
+
+# AWS managed policy: CloudWatch Logs (CreateLogGroup, CreateLogStream, PutLogEvents)
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+#################################################
+# IAM INLINE POLICY — permisos de mínimo privilegio
+# S3: solo los prefijos input/ y resized/
+# SQS: solo la cola de procesamiento
+# DynamoDB: solo la tabla de metadata
+# SNS: solo el topic de notificaciones
+#################################################
+
+resource "aws_iam_role_policy" "lambda_custom" {
+  name = "{local.prefix}-lambda-policy"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "S3ReadInput"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "{aws_s3_bucket.images.arn}/image-resize/input/*"
+        ]
+      },
+      {
+        Sid    = "S3WriteResized"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "{aws_s3_bucket.images.arn}/image-resize/resized/*"
+        ]
+      },
+      {
+        Sid    = "DynamoDBAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = [aws_dynamodb_table.images.arn]
+      },
+      {
+        Sid      = "SNSPublish"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = [aws_sns_topic.notifications.arn]
+      },
+      {
+        Sid    = "SQSConsumeMessages"
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = [aws_sqs_queue.processing.arn]
+      }
+    ]
+  })
+}
+`,
+      },
+
+      {
+        title: "dynamodb.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# DYNAMODB TABLE — metadata de imágenes procesadas
+# Clave: imageId (S3 object key de la imagen original)
+# TTL: expiresAt — los ítems expiran a los 90 días automáticamente
+#################################################
+
+resource "aws_dynamodb_table" "images" {
+  name         = "{local.prefix}-metadata"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "imageId"
+
+  attribute {
+    name = "imageId"
+    type = "S"
+  }
+
+  # TTL: Lambda escribe expiresAt como Unix timestamp
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-metadata"
+    Purpose = "image-metadata-storage"
+  })
+}
+`,
+      },
+
+      {
+        title: "cloudwatch.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `#################################################
+# CLOUDWATCH LOG GROUP — logs de Lambda
+# Creado explícitamente para controlar retención
+# y garantizar que los tags del proyecto se apliquen.
+#################################################
+
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/{aws_lambda_function.image_processor.function_name}"
+  retention_in_days = var.log_retention_days
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-lambda-logs"
+    Purpose = "lambda-execution-logs"
+  })
+}
+
+#################################################
+# CLOUDWATCH ALARM — mensajes en DLQ
+# Se activa si hay ≥1 mensaje visible en la DLQ,
+# lo que indica fallos repetidos en el procesamiento.
+# Acción: publica en SNS para notificar al equipo de operaciones.
+#################################################
+
 resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
-  alarm_name          = "image-dlq-not-empty"
+  alarm_name          = "{local.prefix}-dlq-not-empty"
+  alarm_description   = "La DLQ tiene mensajes — revisa los fallos de procesamiento en Lambda."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "ApproximateNumberOfMessagesVisible"
@@ -1181,12 +2351,153 @@ resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
   period              = 60
   statistic           = "Sum"
   threshold           = 0
-  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
 
   dimensions = {
     QueueName = aws_sqs_queue.dlq.name
   }
-}`,
+
+  alarm_actions = [aws_sns_topic.notifications.arn]
+  ok_actions    = [aws_sns_topic.notifications.arn]
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-dlq-alarm"
+    Purpose = "dlq-monitoring"
+  })
+}
+
+#################################################
+# CLOUDWATCH ALARM — errores de Lambda
+# Se activa si Lambda lanza ≥1 error en el período.
+#################################################
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  alarm_name          = "{local.prefix}-lambda-errors"
+  alarm_description   = "Lambda registró errores en el procesamiento de imágenes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.image_processor.function_name
+  }
+
+  alarm_actions = [aws_sns_topic.notifications.arn]
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-lambda-errors-alarm"
+    Purpose = "lambda-error-monitoring"
+  })
+}
+
+#################################################
+# CLOUDWATCH ALARM — throttles de Lambda
+# Se activa si Lambda es throttled, lo que indica
+# que el reservedConcurrency es insuficiente para la carga.
+#################################################
+
+resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
+  alarm_name          = "{local.prefix}-lambda-throttles"
+  alarm_description   = "Lambda está siendo throttled — considera aumentar reserved concurrency."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Throttles"
+  namespace           = "AWS/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.image_processor.function_name
+  }
+
+  alarm_actions = [aws_sns_topic.notifications.arn]
+
+  tags = merge(local.tags, {
+    Name    = "{local.prefix}-lambda-throttles-alarm"
+    Purpose = "lambda-throttle-monitoring"
+  })
+}
+`,
+      },
+
+      {
+        title: "outputs.tf — Infraestructura completa en Terraform",
+        language: "terraform",
+        code: `output "bucket_name" {
+  description = "Nombre del bucket S3 de imágenes."
+  value       = aws_s3_bucket.images.bucket
+}
+
+output "bucket_arn" {
+  description = "ARN del bucket S3."
+  value       = aws_s3_bucket.images.arn
+}
+
+output "sqs_queue_url" {
+  description = "URL de la cola SQS de procesamiento."
+  value       = aws_sqs_queue.processing.id
+}
+
+output "sqs_queue_arn" {
+  description = "ARN de la cola SQS de procesamiento."
+  value       = aws_sqs_queue.processing.arn
+}
+
+output "sqs_dlq_url" {
+  description = "URL de la Dead-Letter Queue."
+  value       = aws_sqs_queue.dlq.id
+}
+
+output "dynamodb_table_name" {
+  description = "Nombre de la tabla DynamoDB."
+  value       = aws_dynamodb_table.images.name
+}
+
+output "dynamodb_table_arn" {
+  description = "ARN de la tabla DynamoDB."
+  value       = aws_dynamodb_table.images.arn
+}
+
+output "sns_topic_arn" {
+  description = "ARN del topic SNS de notificaciones."
+  value       = aws_sns_topic.notifications.arn
+}
+
+output "lambda_function_name" {
+  description = "Nombre de la función Lambda."
+  value       = aws_lambda_function.image_processor.function_name
+}
+
+output "lambda_function_arn" {
+  description = "ARN de la función Lambda."
+  value       = aws_lambda_function.image_processor.arn
+}
+
+output "lambda_role_arn" {
+  description = "ARN del IAM Role de Lambda."
+  value       = aws_iam_role.lambda.arn
+}
+
+output "cloudwatch_log_group" {
+  description = "Nombre del Log Group de Lambda en CloudWatch."
+  value       = aws_cloudwatch_log_group.lambda.name
+}
+
+output "env_vars_for_backend" {
+  description = "Variables de entorno necesarias para el backend Express."
+  value = {
+    AWS_BUCKET_NAME = aws_s3_bucket.images.bucket
+    AWS_REGION      = var.aws_region
+  }
+}
+`,
       },
     ],
   },
