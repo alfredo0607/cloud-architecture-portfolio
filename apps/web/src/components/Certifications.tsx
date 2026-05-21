@@ -101,7 +101,10 @@ const providers = ["aws", "azure", "hashicorp"] as const;
 
 export function Certifications() {
   return (
-    <section id="certificaciones" className="py-24 px-6 border-t border-border-subtle">
+    <section
+      id="certificaciones"
+      className="py-24 px-6 border-t border-border-subtle"
+    >
       <div className="max-w-6xl mx-auto">
         <div className="mb-16">
           <p className="font-mono text-muted text-sm tracking-widest uppercase mb-3">
@@ -154,7 +157,9 @@ export function Certifications() {
                           <p className="text-foreground font-semibold text-sm leading-snug">
                             {cert.name}
                           </p>
-                          <p className="text-muted text-xs mt-1">{cert.level}</p>
+                          <p className="text-muted text-xs mt-1">
+                            {cert.level}
+                          </p>
                         </div>
 
                         {/* Level indicator dots */}
@@ -178,7 +183,7 @@ export function Certifications() {
                                   }`}
                                 />
                               );
-                            }
+                            },
                           )}
                         </div>
                       </div>
