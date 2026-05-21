@@ -3,25 +3,43 @@ export function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-sm border-b border-border-subtle">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
         <span className="font-mono text-sm text-aws tracking-wider">
-          alfredo.dominguez
+          alfredo-dominguez
         </span>
         <div className="flex items-center gap-5 text-sm text-muted">
-          <a href="#arquitecturas" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#arquitecturas"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             ☁️ Arquitecturas
           </a>
-          <a href="#proyectos" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#proyectos"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             💻 Proyectos
           </a>
-          <a href="#certificaciones" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#certificaciones"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             Certs
           </a>
-          <a href="#educacion" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#educacion"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             Estudios
           </a>
-          <a href="#stack" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#stack"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             Stack
           </a>
-          <a href="#contacto" className="hover:text-foreground transition-colors hidden md:block">
+          <a
+            href="#contacto"
+            className="hover:text-foreground transition-colors hidden md:block"
+          >
             Contacto
           </a>
           <a
