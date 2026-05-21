@@ -16,6 +16,13 @@ const certifications: Cert[] = [
     status: "planned",
   },
   {
+    code: "DVA-C02",
+    name: "AWS Developer – Associate",
+    provider: "aws",
+    level: "Associate",
+    status: "planned",
+  },
+  {
     code: "SAA-C03",
     name: "AWS Solutions Architect – Associate",
     provider: "aws",
@@ -29,13 +36,7 @@ const certifications: Cert[] = [
     level: "Professional",
     status: "planned",
   },
-  {
-    code: "DVA-C02",
-    name: "AWS Developer – Associate",
-    provider: "aws",
-    level: "Associate",
-    status: "planned",
-  },
+
   // Azure
   {
     code: "AZ-900",
