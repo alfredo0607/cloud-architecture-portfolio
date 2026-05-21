@@ -29,6 +29,8 @@ const links = [
   },
 ];
 
+// log
+
 export function Contact() {
   return (
     <section id="contacto" className="py-24 px-6 border-t border-border-subtle">
@@ -90,7 +92,8 @@ export function Footer() {
     <footer className="border-t border-border-subtle py-8 px-6">
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted">
         <span className="font-mono">
-          Alfredo José Dominguez Hernández · AWS Solutions Architect & Full Stack Engineer
+          Alfredo José Dominguez Hernández · AWS Solutions Architect & Full
+          Stack Engineer
         </span>
         <span className="font-mono text-xs">
           Construido con criterio arquitectónico, no solo con código.

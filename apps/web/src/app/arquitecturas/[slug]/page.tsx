@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 import { architectures, getArchitecture } from "@/lib/data/architectures";
 
 export function generateStaticParams() {
@@ -139,11 +140,24 @@ export default async function ArchitectureDetailPage({
 
         {/* Diagrama */}
         <Section title="Diagrama de Arquitectura">
-          <div className="bg-surface border border-border-subtle rounded-xl p-6 overflow-x-auto">
-            <pre className="font-mono text-sm text-foreground/80 leading-relaxed whitespace-pre">
-              {arch.diagram}
-            </pre>
-          </div>
+          {arch.diagramImage ? (
+            <div className="bg-surface border border-border-subtle rounded-xl p-6">
+              <Image
+                src={arch.diagramImage}
+                alt={`Diagrama de arquitectura — ${arch.title}`}
+                width={1200}
+                height={800}
+                className="w-full h-auto rounded-lg"
+                priority
+              />
+            </div>
+          ) : (
+            <div className="bg-surface border border-border-subtle rounded-xl p-6 overflow-x-auto">
+              <pre className="font-mono text-sm text-foreground/80 leading-relaxed whitespace-pre">
+                {arch.diagram}
+              </pre>
+            </div>
+          )}
         </Section>
 
         {/* Cómo funciona */}

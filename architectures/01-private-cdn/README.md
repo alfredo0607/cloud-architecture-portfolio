@@ -10,19 +10,7 @@ CloudFront + S3 con Signed URLs y Origin Access Control (OAC).
 
 ## Diagrama
 
-```
-Usuario
-  │
-  ▼
-CloudFront Distribution
-  │  (valida Signed URL / Cookie)
-  ▼
-S3 Bucket (privado, sin acceso público)
-  │  (OAC — SigV4)
-  └── Solo CloudFront puede leer
-```
-
-> Diagrama detallado: `diagram.png` (pendiente — usar draw.io o Excalidraw)
+![Arquitectura CDN Privada Segura](architecture.drawio.png)
 
 ## Servicios AWS
 
@@ -64,7 +52,7 @@ Ubicación: [`../../demos/signed-url-demo/`](../../demos/signed-url-demo/)
 
 ## Estado
 
-- [ ] Diagrama arquitectural
+- [x] Diagrama arquitectural
 - [ ] IaC Terraform en `../../infrastructure/terraform/`
 - [ ] Demo funcional
 - [ ] ADR adicionales documentados

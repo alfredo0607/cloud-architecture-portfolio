@@ -42,9 +42,16 @@ export function Hero() {
             href="https://www.linkedin.com/in/alfredo-jose-dominguez-hernandez"
             target="_blank"
             rel="noopener noreferrer"
-            className="border border-border-subtle text-muted px-8 py-3 rounded font-semibold hover:border-aws/40 hover:text-foreground transition-colors"
+            className="border border-aws/50 text-aws px-8 py-3 rounded font-semibold hover:bg-aws/10 transition-colors"
           >
             LinkedIn →
+          </a>
+          <a
+            href="/cv-alfredo-dominguez.pdf"
+            download
+            className="border border-aws/50 text-aws px-8 py-3 rounded font-semibold hover:bg-aws/10 transition-colors"
+          >
+            ↓ Descargar CV
           </a>
         </div>
 

@@ -6,23 +6,48 @@ export function Navbar() {
           alfredo.dominguez
         </span>
         <div className="flex items-center gap-5 text-sm text-muted">
-          <a href="#arquitecturas" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#arquitecturas"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             ☁️ Arquitecturas
           </a>
-          <a href="#proyectos" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#proyectos"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             💻 Proyectos
           </a>
-          <a href="#certificaciones" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#certificaciones"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             Certs
           </a>
-          <a href="#educacion" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#educacion"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             Estudios
           </a>
-          <a href="#stack" className="hover:text-foreground transition-colors hidden lg:block">
+          <a
+            href="#stack"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
             Stack
           </a>
-          <a href="#contacto" className="hover:text-foreground transition-colors hidden md:block">
+          <a
+            href="#contacto"
+            className="hover:text-foreground transition-colors hidden md:block"
+          >
             Contacto
+          </a>
+          <a
+            href="/cv-alfredo-dominguez.pdf"
+            download
+            className="border border-aws/50 text-aws px-3 py-1 rounded font-semibold hover:bg-aws/10 transition-colors hidden sm:block"
+          >
+            ↓ CV
           </a>
           <a
             href="https://wa.me/573116534760"

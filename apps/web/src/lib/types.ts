@@ -41,6 +41,7 @@ export type Architecture = {
   problem: string;
   solution: string;
   diagram: string;
+  diagramImage?: string;
   steps: Step[];
   services: Service[];
   decisions: Decision[];
