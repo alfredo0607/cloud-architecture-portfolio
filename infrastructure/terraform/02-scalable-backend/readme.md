@@ -31,6 +31,8 @@ CloudWatch (métricas + logs + alarms)
 
 > Diagrama detallado: `diagram.png` (pendiente)
 
+- [Diagrama detallado](/architectures//02-scalable-backend//architecture-scalable-backend.drawio.png)
+
 ## Servicios AWS
 
 | Servicio                  | Rol                                      |

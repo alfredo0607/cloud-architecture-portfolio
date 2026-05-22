@@ -10,7 +10,7 @@ ECS Fargate + Application Load Balancer + Auto Scaling con rolling deployments y
 
 ## Diagrama ()
 
-![Diagrama de arquitectura AWS](/architectures/02-scalable-backend/architecture-scalable-backend.png)
+![Diagrama de arquitectura AWS](/architectures//02-scalable-backend//architecture-scalable-backend.drawio.png)
 
 ## Servicios AWS
 
