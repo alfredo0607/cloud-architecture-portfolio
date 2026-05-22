@@ -2505,6 +2505,504 @@ output "env_vars_for_backend" {
       },
     ],
   },
+
+  {
+    slug: "04-container-backend",
+    githubUrl:
+      "https://github.com/alfredo0607/cloud-architecture-portfolio/tree/main/infrastructure/terraform/04-container-backend",
+    demoUrl: undefined,
+    diagramImage:
+      "/architectures/04-container-backend/infrastructure-container-backend.png",
+    number: "04",
+    title: "Backend Containerizado en EC2",
+    tagline:
+      "APIs Node.js en Docker sobre EC2 Graviton2 con Nginx como reverse proxy, HTTPS automático vía Let's Encrypt y despliegues sin downtime.",
+    status: "building",
+    tags: [
+      "EC2",
+      "Docker",
+      "Nginx",
+      "Certbot",
+      "Elastic IP",
+      "VPC",
+      "Terraform",
+      "Graviton2",
+    ],
+    problem:
+      "Un equipo necesita ejecutar una o varias APIs Node.js en contenedores Docker con HTTPS por subdominio, sin la complejidad operacional de ECS/Fargate ni el costo de un ALB. La solución debe permitir desplegar nuevas versiones sin downtime, gestionar certificados SSL automáticamente y ser reproducible desde cero con IaC.",
+    solution:
+      "Una instancia EC2 t4g.micro (Graviton2, ARM64, Free Tier) ejecuta Docker como runtime de contenedores. Nginx actúa como reverse proxy enrutando el tráfico HTTPS de cada subdominio al puerto del host correspondiente. Certbot gestiona la emisión y renovación automática de certificados Let's Encrypt. Terraform provisiona toda la infraestructura (VPC mínima, Security Group, par de claves ED25519, Elastic IP) y deja la instancia lista con dos scripts operacionales: deploy.sh para actualizar contenedores y add-api.sh para registrar nuevos subdominios con HTTPS.",
+    diagram: `
+  Internet
+     │ :443 / :80
+     ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Elastic IP (estática, us-east-1)                            │
+  │  ┌──────────────────────────────────────────────────────┐   │
+  │  │  EC2 t4g.micro — Amazon Linux 2023 (ARM64)           │   │
+  │  │                                                      │   │
+  │  │  Nginx (reverse proxy)                               │   │
+  │  │  ├── api1.dominio.dev  :443 → localhost:3001         │   │
+  │  │  ├── api2.dominio.dev  :443 → localhost:3002         │   │
+  │  │  └── ... (add-api.sh registra nuevos subdominios)    │   │
+  │  │                                                      │   │
+  │  │  Docker containers                                   │   │
+  │  │  ├── container-1 (Node.js)  :3001                    │   │
+  │  │  ├── container-2 (Node.js)  :3002                    │   │
+  │  │  └── ...                                             │   │
+  │  │                                                      │   │
+  │  │  Certbot — Let's Encrypt (renovación automática)     │   │
+  │  └──────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────┘
+
+  VPC 10.0.0.0/16
+    └── Subnet pública 10.0.1.0/24 (us-east-1a)
+          └── Security Group
+                ├── :22  SSH (CIDR restringible)
+                ├── :80  HTTP (validación ACME Let's Encrypt)
+                └── :443 HTTPS (tráfico de aplicación)
+
+  Despliegue de nueva versión:
+  ./deploy.sh <imagen> <container> <puerto>
+    → docker pull → docker stop/rm → docker run --restart unless-stopped
+    → docker image prune`,
+    steps: [
+      {
+        n: 1,
+        title: "Terraform provisiona la infraestructura base",
+        detail:
+          "terraform apply crea: VPC (10.0.0.0/16), subnet pública (10.0.1.0/24, us-east-1a), Internet Gateway, route table, Security Group (22/80/443), par de claves ED25519 (generado en runtime, guardado en ec2-backend-dev.pem con permisos 0600), instancia EC2 t4g.micro con volumen gp3 30GB cifrado, y Elastic IP asociada. user_data.sh se ejecuta al arranque instalando Docker, Nginx, Certbot y los scripts operacionales.",
+      },
+      {
+        n: 2,
+        title: "Inicialización del servidor vía user_data.sh",
+        detail:
+          "Al primer boot, user_data.sh actualiza el sistema con dnf, instala Docker (systemctl enable + start, ec2-user en el grupo docker), Nginx con configuración base (sin virtual hosts), Certbot (python3-certbot-nginx), y deposita deploy.sh y add-api.sh en /home/ec2-user/ con permisos de ejecución. La instancia queda lista para recibir contenedores sin intervención manual adicional.",
+      },
+      {
+        n: 3,
+        title: "Configuración DNS del subdominio",
+        detail:
+          "En el proveedor DNS se crea un registro A que apunta el subdominio (ej: api.dominio.dev) a la Elastic IP devuelta por terraform output elastic_ip. La Elastic IP garantiza que este registro no cambia aunque la instancia se reinicie o se re-cree. Este paso debe completarse antes de ejecutar add-api.sh para que Certbot pueda verificar la propiedad del dominio.",
+      },
+      {
+        n: 4,
+        title: "Registro del subdominio con HTTPS vía add-api.sh",
+        detail:
+          "add-api.sh recibe el subdominio completo y el puerto del host. Crea el archivo de virtual host en /etc/nginx/conf.d/<subdominio>.conf con proxy_pass a localhost:<puerto> y las cabeceras correctas (X-Real-IP, X-Forwarded-For, X-Forwarded-Proto). Recarga Nginx y lanza certbot --nginx en modo no interactivo para obtener el certificado Let's Encrypt y configurar la redirección HTTP→HTTPS automáticamente.",
+      },
+      {
+        n: 5,
+        title: "Despliegue del contenedor Docker vía deploy.sh",
+        detail:
+          "deploy.sh recibe la imagen Docker, el nombre del contenedor y el puerto del host. Detiene y elimina el contenedor anterior con el mismo nombre (si existe), hace docker pull de la nueva imagen, y lanza el contenedor con --restart unless-stopped, -p HOST_PORT:3000, y --env-file apuntando a .env.<container> o .env como fallback. Ejecuta docker image prune al final. El contenedor puede actualizarse sin downtime: el nuevo contenedor sube antes de que el anterior sea eliminado.",
+      },
+      {
+        n: 6,
+        title: "Nginx enruta el tráfico HTTPS al contenedor",
+        detail:
+          "El tráfico HTTPS llega a Nginx, que lo desencripta usando el certificado Let's Encrypt y hace proxy_pass a localhost:<puerto_host>. El contenedor Node.js escucha en el puerto 3000 internamente y nunca queda expuesto directamente a Internet. Para agregar una nueva API se repiten los pasos 3-5 con un subdominio y puerto diferentes, sin reiniciar las APIs existentes.",
+      },
+    ],
+    services: [
+      {
+        name: "EC2 t4g.micro (Graviton2)",
+        role: "Compute ARM64, Free Tier actual",
+        detail:
+          "2 vCPU, 1 GB RAM. Amazon Linux 2023 ARM64, AMI seleccionada dinámicamente con data source. Volumen raíz gp3 30GB cifrado. Reemplaza la generación t2/t3 micro en las cuentas creadas desde 2024.",
+      },
+      {
+        name: "Elastic IP",
+        role: "IP pública estática para resolución DNS estable",
+        detail:
+          "Asociada a la instancia. Sobrevive reinicios y re-creaciones de la instancia. Necesaria para que el registro DNS A del subdominio no expire. Sin costo mientras esté asociada a una instancia en ejecución.",
+      },
+      {
+        name: "VPC + Subnet + IGW",
+        role: "Red aislada con acceso a internet",
+        detail:
+          "VPC 10.0.0.0/16 con DNS habilitado. Subnet pública 10.0.1.0/24 en us-east-1a (t4g.micro no disponible en us-east-1e). Route table con ruta 0.0.0.0/0 al Internet Gateway para tráfico entrante y saliente.",
+      },
+      {
+        name: "Security Group",
+        role: "Firewall de la instancia",
+        detail:
+          "Ingress: 22 (SSH, CIDR configurable), 80 (HTTP, 0.0.0.0/0 para validación ACME), 443 (HTTPS, 0.0.0.0/0). Egress: todo (Docker pulls, actualizaciones dnf, ACME challenge). ssh_allowed_cidr se puede restringir a una IP específica.",
+      },
+      {
+        name: "AWS Key Pair (ED25519)",
+        role: "Acceso SSH a la instancia",
+        detail:
+          "Par de claves generado por el provider hashicorp/tls en tiempo de terraform apply. La clave privada se guarda en ec2-backend-dev.pem con permisos 0600. Nunca se sube al repositorio (.gitignore). Algoritmo ED25519: más seguro y compacto que RSA-4096.",
+      },
+      {
+        name: "Docker + Nginx + Certbot",
+        role: "Stack de aplicación en la instancia",
+        detail:
+          "Docker ejecuta los contenedores Node.js. Nginx es el reverse proxy que termina HTTPS y enruta por subdominio. Certbot (python3-certbot-nginx) gestiona certificados Let's Encrypt con renovación automática via cron/systemd.",
+      },
+    ],
+    decisions: [
+      {
+        title: "EC2 directo vs ECS Fargate vs App Runner",
+        chosen: "EC2 t4g.micro directo",
+        why: "Para cargas pequeñas y predecibles con presupuesto mínimo, EC2 directo es la opción más económica: $0/mes con Free Tier vs ~$15-30/mes en ECS Fargate. La complejidad operacional se mitiga con los scripts deploy.sh y add-api.sh. ECS Fargate es preferible cuando se necesita escala horizontal automática o despliegues blue/green.",
+        alternatives: [
+          "ECS Fargate — autoscaling y zero-ops, pero ~10x más caro para cargas pequeñas",
+          "App Runner — más simple aún, pero menos control sobre networking y certificados",
+          "EC2 + ECS on EC2 — más barato que Fargate a alta utilización, pero gestión de cluster",
+        ],
+      },
+      {
+        title: "Nginx como reverse proxy vs ALB",
+        chosen: "Nginx en la misma instancia",
+        why: "Un ALB costaría ~$16/mes de base, más que el costo de toda la infraestructura actual. Nginx en la instancia ofrece el mismo enrutamiento por subdominio y terminación TLS a costo cero. La limitación es que Nginx no ofrece health checks automáticos ni escala horizontal, pero para una sola instancia es la elección correcta.",
+        alternatives: [
+          "Application Load Balancer — ~$16/mes base, necesario para múltiples instancias y auto-scaling",
+          "Traefik — alternativa moderna con autodiscovery de Docker, más complejo de configurar",
+        ],
+      },
+      {
+        title: "Let's Encrypt via Certbot vs ACM",
+        chosen: "Let's Encrypt via Certbot",
+        why: "ACM solo puede usarse con balanceadores de carga de AWS (ALB, NLB, CloudFront). Para EC2 sin ALB, Certbot es la única opción para HTTPS gratuito. Los certificados Let's Encrypt se renuevan cada 90 días; Certbot configura un cron/systemd timer para renovación automática.",
+        alternatives: [
+          "ACM — solo funciona con ALB/CloudFront, requiere balanceador adicional",
+          "Certificado autofirmado — navegadores mostrarían advertencia de seguridad",
+          "Certificado comercial — costo anual, renovación manual",
+        ],
+      },
+    ],
+    security: [
+      "Volumen EBS raíz cifrado (gp3, encrypted=true): datos en reposo protegidos sin overhead de performance.",
+      "Par de claves ED25519 generado por Terraform en runtime: nunca se almacena ni sube ninguna clave pública preexistente al repositorio.",
+      "ec2-backend-dev.pem con permisos 0600 y en .gitignore: la clave privada SSH nunca sale del entorno local.",
+      "ssh_allowed_cidr configurable: restringir a tu IP pública (/32) en entornos de producción para eliminar el ataque de fuerza bruta por Internet.",
+      "Puerto 80 abierto únicamente para validación ACME de Let's Encrypt: todo el tráfico de aplicación viaja por HTTPS (443).",
+      "Variables de entorno por contenedor via .env.<container>: cada API tiene sus propias credenciales sin que se compartan entre contenedores.",
+      "Certbot renueva certificados automáticamente cada ~60 días antes de la expiración de 90 días.",
+      "terraform.tfvars en .gitignore: los valores reales de configuración nunca se suben al repositorio.",
+    ],
+    scalability: [
+      "Múltiples APIs en paralelo: cada API corre en su propio contenedor en un puerto diferente del host, sin afectar a las demás.",
+      "Upgrade de instancia sin cambios de código: cambiar instance_type en main.tf y re-aplicar. La Elastic IP garantiza que el DNS no cambia.",
+      "user_data_replace_on_change=true: si cambia el script de inicialización, Terraform recrea la instancia automáticamente.",
+      "Elastic IP garantiza disponibilidad del DNS incluso si la instancia se reinicia o re-crea.",
+      "Para escalar horizontalmente migrar a Arquitectura 02 (ECS Fargate + ALB): el mismo Dockerfile y variables de entorno son compatibles.",
+      "Nginx worker_processes auto: se ajusta automáticamente al número de vCPUs de la instancia.",
+    ],
+    cost: [
+      {
+        item: "EC2 t4g.micro (Free Tier)",
+        estimate: "$0/mes",
+        note: "750 h/mes gratis en cuentas elegibles (2024+). Sin Free Tier: ~$6.80/mes",
+      },
+      {
+        item: "Elastic IP (asociada a instancia activa)",
+        estimate: "$0/mes",
+        note: "Sin costo mientras esté asociada. $0.005/hora si la instancia está detenida",
+      },
+      {
+        item: "EBS gp3 30 GB",
+        estimate: "$2.40/mes",
+        note: "Mínimo requerido por la AMI de Amazon Linux 2023",
+      },
+      {
+        item: "Data Transfer Out",
+        estimate: "$0.09/GB",
+        note: "Primeros 100 GB/mes gratis (Free Tier). 10 GB ≈ $0.90/mes",
+      },
+      {
+        item: "Total con Free Tier activo",
+        estimate: "~$2.40/mes",
+        note: "Prácticamente solo el costo del disco EBS",
+      },
+      {
+        item: "Total sin Free Tier",
+        estimate: "~$9-10/mes",
+        note: "EC2 + EBS + transferencia básica. Sin ALB, sin ECS",
+      },
+    ],
+    snippets: [
+      {
+        title: "Terraform — main.tf completo",
+        language: "hcl",
+        code: `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
+  }
+
+  required_version = ">= 1.4.0"
+}
+
+provider "aws" {
+  region  = "us-east-1"
+  profile = "leader-developer-personal"
+}
+
+variable "env"              { type = string; default = "dev" }
+variable "ssh_allowed_cidr" { type = string; default = "0.0.0.0/0" }
+variable "app_port"         { type = number; default = 3000 }
+variable "domain"           { type = string }
+
+# Última AMI Amazon Linux 2023 ARM64
+data "aws_ami" "al2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter { name = "name";              values = ["al2023-ami-*-arm64"] }
+  filter { name = "virtualization-type"; values = ["hvm"] }
+  filter { name = "architecture";      values = ["arm64"] }
+}
+
+# VPC mínima: 1 subnet pública con salida a internet
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags = { Name = "vpc-backend-\${var.env}", Env = var.env }
+}
+
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "igw-backend-\${var.env}", Env = var.env }
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "us-east-1a"
+  map_public_ip_on_launch = true
+  tags = { Name = "subnet-public-backend-\${var.env}", Env = var.env }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+  route  { cidr_block = "0.0.0.0/0"; gateway_id = aws_internet_gateway.igw.id }
+  tags   = { Name = "rt-public-backend-\${var.env}", Env = var.env }
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_security_group" "ec2_sg" {
+  name   = "ec2-backend-\${var.env}-sg"
+  vpc_id = aws_vpc.main.id
+
+  ingress { description = "SSH";   from_port = 22;  to_port = 22;  protocol = "tcp"; cidr_blocks = [var.ssh_allowed_cidr] }
+  ingress { description = "HTTP";  from_port = 80;  to_port = 80;  protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"] }
+  ingress { description = "HTTPS"; from_port = 443; to_port = 443; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"] }
+  egress  { from_port = 0; to_port = 0; protocol = "-1"; cidr_blocks = ["0.0.0.0/0"] }
+
+  tags = { Name = "ec2-backend-\${var.env}-sg", Env = var.env }
+}
+
+# Par de claves ED25519 generado en runtime
+resource "tls_private_key" "ec2_key" { algorithm = "ED25519" }
+
+resource "aws_key_pair" "deployer" {
+  key_name   = "ec2-backend-\${var.env}-key"
+  public_key = tls_private_key.ec2_key.public_key_openssh
+  tags       = { Name = "ec2-backend-\${var.env}-key", Env = var.env }
+}
+
+resource "local_file" "private_key_pem" {
+  content         = tls_private_key.ec2_key.private_key_openssh
+  filename        = "\${path.module}/ec2-backend-\${var.env}.pem"
+  file_permission = "0600"
+}
+
+resource "aws_instance" "backend" {
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = "t4g.micro"
+  key_name                    = aws_key_pair.deployer.key_name
+  vpc_security_group_ids      = [aws_security_group.ec2_sg.id]
+  subnet_id                   = aws_subnet.public.id
+  user_data                   = templatefile("\${path.module}/user_data.sh", {})
+  user_data_replace_on_change = true
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = 30
+    encrypted   = true
+  }
+
+  tags = { Name = "ec2-backend-\${var.env}", Env = var.env }
+}
+
+resource "aws_eip" "backend_eip" {
+  instance = aws_instance.backend.id
+  domain   = "vpc"
+  tags     = { Name = "ec2-backend-\${var.env}-eip", Env = var.env }
+}
+
+output "elastic_ip"   { value = aws_eip.backend_eip.public_ip }
+output "ssh_command"  { value = "ssh -i ec2-backend-\${var.env}.pem ec2-user@\${aws_eip.backend_eip.public_ip}" }
+output "api_url"      { value = "https://\${var.domain}/api/v1" }`,
+      },
+      {
+        title: "user_data.sh — Inicialización de la instancia",
+        language: "bash",
+        code: `#!/bin/bash
+set -euo pipefail
+
+# Sistema
+dnf update -y
+
+# Docker
+dnf install -y docker
+systemctl start docker && systemctl enable docker
+usermod -aG docker ec2-user
+
+# Nginx con configuración base
+dnf install -y nginx
+cat > /etc/nginx/nginx.conf << 'NGINX_MAIN'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /run/nginx.pid;
+include /usr/share/nginx/modules/*.conf;
+
+events { worker_connections 1024; }
+
+http {
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" $status';
+    access_log /var/log/nginx/access.log main;
+    sendfile on; keepalive_timeout 65;
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    include /etc/nginx/conf.d/*.conf;
+}
+NGINX_MAIN
+
+systemctl start nginx && systemctl enable nginx
+
+# Certbot para Let's Encrypt
+dnf install -y python3-certbot-nginx
+
+# deploy.sh — actualiza o despliega un contenedor Docker
+cat > /home/ec2-user/deploy.sh << 'DEPLOY_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+IMAGE="\${1:?Uso: ./deploy.sh <imagen> <contenedor> <puerto_host>}"
+CONTAINER="\${2:?Uso: ./deploy.sh <imagen> <contenedor> <puerto_host>}"
+HOST_PORT="\${3:?Uso: ./deploy.sh <imagen> <contenedor> <puerto_host>}"
+
+ENV_FILE="/home/ec2-user/.env.$CONTAINER"
+[ ! -f "$ENV_FILE" ] && ENV_FILE="/home/ec2-user/.env"
+
+docker stop "$CONTAINER" 2>/dev/null || true
+docker rm   "$CONTAINER" 2>/dev/null || true
+
+if [ -f "$ENV_FILE" ]; then
+  docker run -d --name "$CONTAINER" --restart unless-stopped \\
+    -p "$HOST_PORT:3000" --env-file "$ENV_FILE" \\
+    -v /home/ec2-user/key:/home/ec2-user/key:ro "$IMAGE"
+else
+  docker run -d --name "$CONTAINER" --restart unless-stopped \\
+    -p "$HOST_PORT:3000" \\
+    -v /home/ec2-user/key:/home/ec2-user/key:ro "$IMAGE"
+fi
+
+docker image prune -f
+echo "[deploy] Listo: $CONTAINER en :$HOST_PORT"
+DEPLOY_SCRIPT
+
+# add-api.sh — registra subdominio en Nginx y obtiene certificado SSL
+cat > /home/ec2-user/add-api.sh << 'ADD_API_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+SUBDOMAIN="\${1:?Uso: ./add-api.sh <subdominio> <puerto> [email]}"
+PORT="\${2:?Uso: ./add-api.sh <subdominio> <puerto> [email]}"
+EMAIL="\${3:-desarrollo@bartik-ing.com}"
+CONF="/etc/nginx/conf.d/$SUBDOMAIN.conf"
+
+if [ ! -f "$CONF" ]; then
+  sudo tee "$CONF" > /dev/null << NGINX_VHOST
+server {
+    listen 80;
+    server_name $SUBDOMAIN;
+    location / {
+        proxy_pass         http://localhost:$PORT;
+        proxy_set_header   Host               \$host;
+        proxy_set_header   X-Real-IP          \$remote_addr;
+        proxy_set_header   X-Forwarded-For    \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto  \$scheme;
+    }
+}
+NGINX_VHOST
+  sudo nginx -t && sudo systemctl reload nginx
+fi
+
+sudo certbot --nginx -d "$SUBDOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+echo "[add-api] HTTPS activo en https://$SUBDOMAIN"
+ADD_API_SCRIPT
+
+chmod +x /home/ec2-user/deploy.sh /home/ec2-user/add-api.sh
+chown ec2-user:ec2-user /home/ec2-user/deploy.sh /home/ec2-user/add-api.sh`,
+      },
+      {
+        title: "Despliegue de una API — comandos completos",
+        language: "bash",
+        code: `# 1. Aplicar la infraestructura
+terraform init && terraform apply
+
+# 2. Ver los outputs
+terraform output
+# elastic_ip  = "44.206.195.129"
+# ssh_command = "ssh -i ec2-backend-dev.pem ec2-user@44.206.195.129"
+# api_url     = "https://api.alfredo-dominguez.dev/api/v1"
+
+# 3. Conectarse por SSH (esperar ~2 min a que user_data.sh termine)
+ssh -i ec2-backend-dev.pem ec2-user@44.206.195.129
+
+# 4. Configurar DNS: crear registro A en tu proveedor DNS
+#    api.alfredo-dominguez.dev → 44.206.195.129
+
+# 5. Registrar el subdominio con HTTPS
+./add-api.sh api.alfredo-dominguez.dev 3001
+# → Crea /etc/nginx/conf.d/api.alfredo-dominguez.dev.conf
+# → Obtiene certificado Let's Encrypt
+# → Configura redirección HTTP → HTTPS
+
+# 6. Crear archivo de variables de entorno para el contenedor
+cat > .env.my-api << 'EOF'
+NODE_ENV=production
+PORT=3000
+DB_URL=postgresql://user:pass@host:5432/db
+JWT_SECRET=supersecret
+EOF
+
+# 7. Desplegar el contenedor
+./deploy.sh ghcr.io/org/my-api:latest my-api 3001
+# → docker pull ghcr.io/org/my-api:latest
+# → docker run -d --name my-api --restart unless-stopped -p 3001:3000 ...
+
+# 8. Verificar
+curl https://api.alfredo-dominguez.dev/health
+# {"status":"ok"}
+
+# Para agregar una segunda API en el mismo servidor:
+./add-api.sh api2.alfredo-dominguez.dev 3002
+./deploy.sh ghcr.io/org/another-api:latest another-api 3002`,
+      },
+    ],
+  },
 ];
 
 export function getArchitecture(slug: string): Architecture | undefined {
