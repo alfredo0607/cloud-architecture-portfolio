@@ -1428,7 +1428,7 @@ output "cloudwatch_dashboard_url" {
       "https://github.com/alfredo0607/aws-event-driven-image-processing-platform",
     demoUrl: "https://services-resize-image.alfredo-dominguez.dev",
     diagramImage:
-      "/architectures/03-event-driven-serverless/architecture-event-driven-serverless.png",
+      "/architectures/03-event-driven-serverless/infrastructure-event-driven-serverless.png",
     number: "03",
     title: "Arquitectura Event-Driven Serverless",
     tagline:
