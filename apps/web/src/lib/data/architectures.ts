@@ -5,7 +5,8 @@ export const architectures: Architecture[] = [
     slug: "01-private-cdn",
     githubUrl: "https://github.com/alfredo0607/aws-secure-content-distribution",
     demoUrl: "https://images-url-signature.alfredo-dominguez.dev/",
-    diagramImage: "/architectures/01-private-cdn/architecture.drawio.png",
+    diagramImage:
+      "/architectures/01-private-cdn/infrastructure-private-cdn.png",
     number: "01",
     title: "CDN Privada Segura",
     tagline:
@@ -456,7 +457,7 @@ export default firmarUrl;
       "https://github.com/alfredo0607/cloud-architecture-portfolio/tree/main/architectures/02-scalable-backend",
     demoUrl: undefined,
     diagramImage:
-      "/architectures/02-scalable-backend/architecture-scalable-backend.drawio.png",
+      "/architectures/02-scalable-backend/architecture-scalable-backend.png",
     number: "02",
     title: "Backend Escalable con Contenedores",
     tagline:
@@ -1426,6 +1427,8 @@ output "cloudwatch_dashboard_url" {
     githubUrl:
       "https://github.com/alfredo0607/aws-event-driven-image-processing-platform",
     demoUrl: "https://services-resize-image.alfredo-dominguez.dev",
+    diagramImage:
+      "/architectures/03-event-driven-serverless/architecture-event-driven-serverless.png",
     number: "03",
     title: "Arquitectura Event-Driven Serverless",
     tagline:
