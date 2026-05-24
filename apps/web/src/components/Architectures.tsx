@@ -44,11 +44,11 @@ export function Architectures() {
                 <h3 className="text-lg font-semibold text-foreground mb-2 group-hover:text-aws transition-colors">
                   {arch.title}
                 </h3>
-                <p className="text-muted text-sm leading-relaxed">
+                <p className="text-muted text-sm leading-relaxed line-clamp-2">
                   <span className="text-foreground/60 font-medium">Problema: </span>
                   {arch.problem}
                 </p>
-                <p className="text-muted text-sm leading-relaxed mt-2">
+                <p className="text-muted text-sm leading-relaxed mt-2 line-clamp-2">
                   <span className="text-foreground/60 font-medium">Solución: </span>
                   {arch.solution}
                 </p>

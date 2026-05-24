@@ -2,7 +2,7 @@ import Link from "next/link";
 import { projects } from "@/lib/data/projects";
 
 const statusConfig: Record<
-  "live" | "building" | "planned",
+  "live" | "building" | "planned" | "In development",
   { label: string; className: string }
 > = {
   live: {
@@ -17,11 +17,18 @@ const statusConfig: Record<
     label: "planned",
     className: "bg-surface text-muted border border-border-subtle",
   },
+  "In development": {
+    label: "In development",
+    className: "bg-blue-900/40 text-blue-400 border border-blue-800",
+  },
 };
 
 export function Projects() {
   return (
-    <section id="proyectos" className="py-24 px-6 border-t border-border-subtle">
+    <section
+      id="proyectos"
+      className="py-24 px-6 border-t border-border-subtle"
+    >
       <div className="max-w-6xl mx-auto">
         <div className="mb-16">
           <p className="font-mono text-sm tracking-widest uppercase mb-3 text-foreground/60">
@@ -71,6 +78,16 @@ export function Projects() {
                     </span>
                   ))}
                 </div>
+
+                {project.architectureSlugs &&
+                  project.architectureSlugs.length > 0 && (
+                    <p className="text-xs font-mono text-muted">
+                      Arquitecturas:{" "}
+                      {project.architectureSlugs
+                        .map((s) => s.split("-")[0])
+                        .join(", ")}
+                    </p>
+                  )}
 
                 <span className="text-xs text-foreground/40 group-hover:text-aws group-hover:underline font-mono transition-colors">
                   Ver documentación técnica →

@@ -3003,6 +3003,1277 @@ curl https://api.alfredo-dominguez.dev/health
       },
     ],
   },
+  
+  {
+    slug: "05-gps-vehicle-tracking",
+    githubUrl:
+      "https://github.com/alfredo0607/gps-vehicle-tracking-system/tree/main/infrastructure",
+    demoUrl: "https://tracking-vehicle-aws.alfredo-dominguez.dev",
+    number: "05",
+    title: "Rastreo GPS Vehicular en Tiempo Real",
+    diagramImage:
+      "/architectures/05-gps-vehicle-tracking/infrastructure-gps-vehicle-tracking.png",
+    tagline:
+      "Teltonika FMC920 → IoT Core → Lambda → DynamoDB + Location Service + SNS",
+    status: "building",
+    tags: [
+      "IoT Core",
+      "Lambda",
+      "DynamoDB",
+      "Location Service",
+      "SNS",
+      "CloudWatch",
+      "Terraform",
+      "MQTT",
+      "Teltonika",
+    ],
+    problem: `Las empresas de transporte y logística necesitan conocer la ubicación de sus vehículos en tiempo real, detectar encendidos y apagados del motor, y enviar comandos remotos a los dispositivos GPS. Construir esta infraestructura desde cero requiere gestionar brokers MQTT, servidores de ingesta de datos, almacenamiento de series temporales y sistemas de alertas — todo con alta disponibilidad y escalabilidad.
+
+El problema se agrava con la heterogeneidad de los dispositivos GPS del mercado: cada fabricante usa protocolos distintos, y conectarlos directamente a APIs REST implica mantener conexiones TCP persistentes, manejar reconexiones, y procesar payloads binarios propietarios.`,
+    solution: `Arquitectura serverless y event-driven construida sobre AWS IoT Core como broker MQTT administrado. El dispositivo Teltonika FMC920 se conecta via MQTT/TLS en el puerto 8883, publica su posición cada 10 segundos y al detectar eventos (encendido, movimiento), y se suscribe a un topic de comandos para recibir instrucciones remotas.
+
+IoT Core ejecuta dos Topic Rules SQL que filtran los mensajes entrantes: una para datos de ubicación (campo \`latlng\` presente) y otra para respuestas de comandos (campo \`RSP\` presente), ambas disparando la misma Lambda \`ProcessGPSData\`. Ésta actualiza AWS Location Service Tracker con la posición en tiempo real, persiste la coordenada en DynamoDB con TTL de 90 días, detecta cambios de estado de ignición y publica alertas via SNS (email/SMS). Una segunda Lambda \`CheckCommandTimeout\` corre cada minuto via EventBridge para marcar como expirados los comandos sin respuesta.`,
+    diagram: ``,
+    steps: [
+      {
+        n: 1,
+        title: "Dispositivo GPS se conecta a IoT Core via MQTT/TLS",
+        detail:
+          "El Teltonika FMC920 establece una conexión MQTT persistente con el endpoint de AWS IoT Core (`*.iot.us-east-1.amazonaws.com`) en el puerto 8883 usando TLS mutuo: el dispositivo presenta su certificado X.509 descargado de la consola de AWS. La política `VehicleGPSPolicy` limita estrictamente los topics que puede publicar y suscribir, usando la variable `${iot:Connection.Thing.ThingName}` (el IMEI) para que cada dispositivo solo acceda a sus propios topics.",
+      },
+      {
+        n: 2,
+        title: "GPS publica payload JSON con posición y telemetría",
+        detail:
+          "Cada 10 segundos (configurable en Teltonika Configurator), y también ante eventos como ignición ON/OFF o inicio de movimiento, el dispositivo publica en `vehicles/{IMEI}/data` un JSON con campos clave: `latlng` (coordenadas), `sp` (velocidad km/h), `alt` (altitud), `ang` (rumbo), `sat` (satélites), `239` (estado ignición: 0/1), `67` (voltaje batería mV), `66` (voltaje externo mV), y `21` (señal GSM). Para respuestas de comandos remotos, el campo `RSP` contiene el resultado.",
+      },
+      {
+        n: 3,
+        title: "Topic Rules filtran y enrutan mensajes a Lambda",
+        detail:
+          "Dos reglas SQL en IoT Core procesan los mensajes del topic `vehicles/+/data`. La regla `ProcessGPSData` se activa cuando el campo `latlng` está presente (`WHERE NOT isUndefined(latlng)`), mientras que `ProcessCommandResponse` se activa cuando existe el campo `RSP`. Ambas enrutan a la misma Lambda `ProcessGPSData`, enriqueciendo el evento con `topic(2) as deviceId` y `clientId()` para identificar el origen sin parsear el mensaje manualmente.",
+      },
+      {
+        n: 4,
+        title: "Lambda actualiza Location Service y persiste coordenada",
+        detail:
+          "La Lambda `ProcessGPSData` (Node.js 18.x, 256 MB, timeout 30s) recibe el evento, parsea las coordenadas del campo `latlng` como `lat,lng`, y llama a `location.batchUpdateDevicePosition()` para actualizar el tracker `VehicleTracker` en AWS Location Service con la posición actual en formato [lng, lat] (GeoJSON). Paralelamente hace un `dynamo.put` en la tabla `Coordenadas` con TTL automático de 90 días, incluyendo todos los campos de telemetría para análisis histórico.",
+      },
+      {
+        n: 5,
+        title: "Detección de cambio de ignición y alerta SNS",
+        detail:
+          "Tras persistir la coordenada, la Lambda consulta la tabla `GPS` por `deviceId` para obtener el `lastIgnitionState` previo. Si el estado cambió (p.ej. de `0` a `1`), crea un registro en la tabla `Eventos` (TTL 365 días) con tipo `ignition_on` o `ignition_off`, y publica una notificación SNS con asunto `Vehículo ENCENDIDO/APAGADO` incluyendo fecha/hora en zona `America/Bogota`, velocidad, voltajes, señal GSM y enlace directo a Google Maps con las coordenadas.",
+      },
+      {
+        n: 6,
+        title: "Comandos remotos y confirmación de ejecución",
+        detail:
+          "El backend publica comandos (p.ej. bloqueo de motor) en `vehicles/{IMEI}/commands` a través de la API de IoT Core (`iot:Publish`). El dispositivo, suscrito a ese topic, ejecuta el comando y responde publicando en `vehicles/{IMEI}/data` con el campo `RSP`. La regla `ProcessCommandResponse` enruta esta respuesta a la Lambda, que consulta la tabla `Comandos` para encontrar el último comando `sent/pending` del dispositivo y lo actualiza a estado `executed` con timestamp y response. Una segunda Lambda `CheckCommandTimeout` corre cada minuto via EventBridge y marca como `timeout` los comandos pendientes con más de N segundos sin respuesta.",
+      },
+    ],
+    services: [
+      {
+        name: "AWS IoT Core",
+        role: "Broker MQTT administrado y motor de reglas",
+        detail:
+          "Gestiona las conexiones MQTT persistentes de los dispositivos GPS con autenticación X.509 por certificado. Las Topic Rules SQL permiten filtrar, transformar y enrutar mensajes a Lambda, DynamoDB u otros servicios de AWS sin código adicional. Escala automáticamente a millones de mensajes por segundo.",
+      },
+      {
+        name: "AWS Lambda",
+        role: "Procesamiento serverless de eventos GPS",
+        detail:
+          "Dos funciones: `ProcessGPSData` (256 MB, 30s) procesa ubicaciones y respuestas de comandos en tiempo real; `CheckCommandTimeout` (128 MB, 60s) corre cada minuto via EventBridge para gestionar comandos expirados. Sin servidores que mantener, con escalado automático por número de mensajes IoT.",
+      },
+      {
+        name: "Amazon DynamoDB",
+        role: "Base de datos NoSQL para estado y series temporales",
+        detail:
+          "6 tablas con billing On-Demand: `GPS` (estado actual del dispositivo), `Coordenadas` (histórico con TTL 90 días), `Vehiculos` (metadatos), `Usuarios` (acceso), `Comandos` (control remoto), `Eventos` (ignición con TTL 365 días). GSIs para consultas por deviceId, vehicleId, plate y status de comandos.",
+      },
+      {
+        name: "AWS Location Service",
+        role: "Rastreo en tiempo real y visualización cartográfica",
+        detail:
+          "El tracker `VehicleTracker` con filtrado temporal (TimeBased) almacena la última posición conocida de cada dispositivo. El mapa `VectorEsriStreets` provee tiles cartográficos para el dashboard sin exponer claves de Google Maps o Mapbox. Soporta geofencing y cálculo de rutas de forma nativa.",
+      },
+      {
+        name: "Amazon SNS",
+        role: "Alertas de eventos de ignición via email y SMS",
+        detail:
+          "Topic `VehicleIgnitionAlerts` con suscripciones opcionales a email y SMS (formato E.164). Publica mensajes estructurados con estado del vehículo, coordenadas, telemetría y enlace de Google Maps. Configurable via variables de Terraform `alert_email` y `alert_phone`.",
+      },
+      {
+        name: "Amazon CloudWatch",
+        role: "Monitoreo, logs y alarmas operacionales",
+        detail:
+          "Log groups para ambas Lambdas con retención configurable. Alarmas en métricas de errores y throttles de Lambda. La regla `EventBridge` de CloudWatch Events dispara `CheckCommandTimeout` cada minuto como cron job serverless.",
+      },
+      {
+        name: "Terraform (IaC)",
+        role: "Infraestructura como código modularizada",
+        detail:
+          "7 módulos independientes: `iam`, `dynamodb`, `sns`, `location_service`, `lambda`, `iot_core`, `cloudwatch`. Cada módulo expone outputs tipados para el `main.tf` raíz. El módulo `iot_core` crea el Thing IoT condicionalmente si se provee la variable `iot_device_imei`.",
+      },
+    ],
+    decisions: [
+      {
+        title: "MQTT via IoT Core vs. API REST",
+        chosen: "AWS IoT Core con MQTT",
+        why: "Los dispositivos GPS envían datos cada 10 segundos de forma continua. MQTT está optimizado para conexiones persistentes de baja latencia con dispositivos de recursos limitados, soporta QoS 1 (at-least-once delivery) y permite publicar/suscribir bidireccionalmente sin polling. Una API REST implicaría reintentos HTTP, timeouts y manejo de reconexiones en el firmware del dispositivo.",
+        alternatives: [
+          "API Gateway REST — overhead HTTP por mensaje, sin soporte nativo de comandos bidireccionales",
+          "Kinesis Data Streams — óptimo para alta volumetría pero sin gestión de dispositivos ni políticas de acceso por certificado",
+          "Broker MQTT propio (Mosquitto en EC2) — requiere gestionar HA, TLS, autenticación y escalado manualmente",
+        ],
+      },
+      {
+        title: "DynamoDB vs. base de datos relacional",
+        chosen: "Amazon DynamoDB On-Demand",
+        why: "Las coordenadas GPS son escrituras masivas con patrón de acceso simple (por gpsId + timestamp). DynamoDB On-Demand elimina la necesidad de provisionar capacidad y el TTL nativo expira automáticamente coordenadas antiguas sin jobs de limpieza. La latencia de escritura sub-milisegundo es clave para no bloquear la Lambda que procesa cada mensaje IoT.",
+        alternatives: [
+          "Amazon RDS PostgreSQL — ideal para queries complejas y JOINs pero sobre-dimensionado para series temporales; requiere gestionar conexiones desde Lambda",
+          "Amazon Timestream — especializado en series temporales con compresión nativa, pero mayor costo y API más limitada para los otros modelos de datos (usuarios, comandos)",
+        ],
+      },
+      {
+        title: "AWS Location Service vs. proveedor de mapas externo",
+        chosen: "AWS Location Service",
+        why: "Mantiene los datos de posición dentro del ecosistema AWS, evitando transferir coordenadas a terceros (Mapbox, Google Maps). Las claves de API de servicios externos deben rotarse y protegerse; Location Service usa IAM. Además, el tracker nativo elimina la necesidad de implementar lógica de almacenamiento de última posición conocida.",
+        alternatives: [
+          "Google Maps Platform — excelente UX pero requiere gestión de claves de API y transmite ubicaciones a servidores de Google",
+          "Mapbox — similar a Google Maps, con buen soporte de tiles vectoriales pero sin integración nativa con IoT Core",
+        ],
+      },
+      {
+        title: "Lambda vs. ECS Fargate para procesamiento GPS",
+        chosen: "AWS Lambda",
+        why: "El procesamiento GPS es completamente event-driven: cada mensaje IoT dispara exactamente una ejecución de Lambda. No hay estado entre ejecuciones, el tiempo de procesamiento es < 1 segundo por mensaje, y el escalado automático de Lambda absorbe picos de tráfico sin configuración adicional. El costo es prácticamente cero para flotas pequeñas-medianas (<100 vehículos).",
+        alternatives: [
+          "ECS Fargate con SQS — mayor throughput sostenido para flotas de miles de vehículos, pero requiere gestionar task definitions, VPC y health checks",
+          "EC2 + proceso Node.js — control total pero sin escalado automático y con costo fijo 24/7",
+        ],
+      },
+    ],
+    security: [
+      "Autenticación mutua TLS (mTLS): cada dispositivo GPS posee su propio certificado X.509 firmado por AWS IoT CA; el servidor también presenta certificado al cliente.",
+      "Política IoT `VehicleGPSPolicy` con privilegio mínimo: el dispositivo solo puede publicar en sus propios topics `vehicles/{IMEI}/data` y `vehicles/{IMEI}/response`, y suscribirse a `vehicles/{IMEI}/commands`.",
+      "Rol IAM de Lambda con acceso restringido: solo `dynamodb:PutItem/UpdateItem/GetItem/Query` en tablas específicas, `geo:BatchUpdateDevicePosition` en el tracker concreto, y `sns:Publish` en el topic de alertas.",
+      "Certificados de dispositivo descargados una única vez desde la consola de AWS; si se comprometen, se revocan individualmente sin afectar otros dispositivos.",
+      "Topics MQTT no son públicos: IoT Core requiere autenticación para cualquier conexión; no es posible publicar sin un certificado válido.",
+      "Variables sensibles (IMEI, email, teléfono) gestionadas como variables de Terraform, nunca hardcodeadas en el código de Lambda.",
+      "TTL en DynamoDB para cumplimiento de retención de datos: coordenadas expiran a 90 días, eventos a 365 días, sin costos adicionales de almacenamiento.",
+    ],
+    scalability: [
+      "IoT Core escala automáticamente a millones de conexiones MQTT concurrentes y millones de mensajes por segundo sin configuración de capacidad.",
+      "Lambda escala horizontalmente por defecto hasta 1,000 ejecuciones concurrentes por región (aumentable con Service Quotas) — cada mensaje IoT es procesado de forma independiente.",
+      "DynamoDB On-Demand ajusta la capacidad de lectura/escritura automáticamente según la demanda, sin provisionar RCUs/WCUs.",
+      "La arquitectura modular de Terraform permite activar geofencing (Location Service), análisis con Athena (exportar DynamoDB a S3), o añadir más tipos de eventos en el firmware sin cambiar la infraestructura base.",
+      "Para flotas de miles de vehículos, la función Lambda puede procesar en batch usando SQS como buffer entre IoT Core y Lambda, mejorando el throughput y reduciendo costos.",
+      "El tracker de Location Service soporta cualquier número de dispositivos; el filtrado `TimeBased` evita duplicados de posición sin código adicional.",
+    ],
+    cost: [
+      {
+        item: "AWS IoT Core",
+        estimate: "$0.00–$1.50/mes",
+        note: "Primer millón de minutos de conexión gratis; ~$0.08/millón de mensajes. Para 10 vehículos enviando cada 10s = ~2.6M mensajes/mes.",
+      },
+      {
+        item: "Lambda (ProcessGPSData)",
+        estimate: "$0.00–$0.50/mes",
+        note: "1M invocaciones gratuitas/mes. 10 vehículos × 8,640 mensajes/día × 30 días ≈ 2.6M invocaciones; primeras 1M gratis, resto ≈ $0.40.",
+      },
+      {
+        item: "DynamoDB On-Demand",
+        estimate: "$1.00–$5.00/mes",
+        note: "Primeras 25 WCUs y 25 RCUs gratis (siempre). Escrituras de coordenadas dominan; 2.6M writes ≈ $1.30. Almacenamiento: 25 GB gratis.",
+      },
+      {
+        item: "AWS Location Service",
+        estimate: "$0.50–$2.00/mes",
+        note: "Primeras 10,000 actualizaciones de posición gratis; luego $0.50/10,000. Tiles del mapa: primeros 200,000 requests gratis.",
+      },
+      {
+        item: "Amazon SNS",
+        estimate: "$0.00–$0.10/mes",
+        note: "Primeras 1M notificaciones email gratis. SMS: ~$0.00645/mensaje. Alertas de ignición son eventos ocasionales.",
+      },
+      {
+        item: "CloudWatch + EventBridge",
+        estimate: "$0.00–$1.00/mes",
+        note: "5 GB de logs gratis; EventBridge cron rules: primeras 14M invocaciones/mes gratis. CheckCommandTimeout (1min) = 43,200 invocaciones/mes.",
+      },
+      {
+        item: "Total estimado (10 vehículos)",
+        estimate: "$2–$10/mes",
+        note: "Escala linealmente con número de vehículos y frecuencia de reportes. Para 100 vehículos: ~$20–$80/mes.",
+      },
+    ],
+    snippets: [
+      {
+        title: "Lambda ProcessGPSData — handler principal (Node.js)",
+        language: "javascript",
+        code: `const AWS = require("aws-sdk");
+const location = new AWS.Location();
+const dynamodb = new AWS.DynamoDB.DocumentClient();
+const sns = new AWS.SNS();
+
+const TRACKER_NAME = "VehicleTracker";
+const TABLE_GPS = "GPS";
+const TABLE_VEHICULOS = "Vehiculos";
+const TABLE_COORDENADAS = "Coordenadas";
+const TABLE_COMANDOS = "Comandos";
+const TABLE_EVENTOS = "Eventos";
+const SNS_TOPIC_ARN = process.env.SNS_TOPIC_ARN || 'arn:aws:sns:us-east-1:339713114556:VehicleIgnitionAlerts';
+
+exports.handler = async (event) => {
+  console.log("📡 Evento recibido:", JSON.stringify(event, null, 2));
+
+  try {
+    // ✅ Detectar si es respuesta de comando
+    if (isCommandResponse(event)) {
+      console.log("📨 Detectado: RESPUESTA DE COMANDO");
+      return await processCommandResponse(event);
+    }
+
+    // ✅ Si no es comando, procesar como ubicación
+    console.log("📍 Detectado: DATOS DE UBICACIÓN");
+    return await processLocationData(event);
+
+  } catch (error) {
+    console.error("❌ Error procesando evento:", error);
+    console.error("Stack:", error.stack);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        error: error.message,
+        type: error.name,
+      }),
+    };
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
+// DETECCIÓN Y PROCESAMIENTO DE RESPUESTAS DE COMANDOS
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * ✅ Detectar si es respuesta de comando
+ */
+function isCommandResponse(event) {
+  // Si tiene campo RSP → es respuesta de comando
+  if (event.RSP) {
+    console.log("✅ Detectado campo RSP");
+    return true;
+  }
+
+  const reported = event.state?.reported;
+  if (reported?.RSP) {
+    console.log("✅ Detectado RSP en state.reported");
+    return true;
+  }
+
+  // Si NO tiene latlng (coordenadas) pero tiene RSP → comando
+  if (!event.latlng && !reported?.latlng && event.RSP) {
+    console.log("✅ Sin coordenadas pero con RSP");
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * ✅ Procesar respuesta de comando
+ */
+async function processCommandResponse(event) {
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("📨 PROCESANDO RESPUESTA DE COMANDO");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  try {
+    const deviceId = event.deviceId || event.clientId;
+    const rsp = event.RSP || event.state?.reported?.RSP;
+
+    console.log("Device ID:", deviceId);
+    console.log("RSP:", rsp);
+
+    // Parsear respuesta
+    const response = parseCommandResponse(event);
+
+    if (!response) {
+      console.error("❌ No se pudo parsear respuesta");
+      return { statusCode: 400, body: "Error parseando respuesta" };
+    }
+
+    console.log("✅ Respuesta parseada:");
+    console.log("  - Comando detectado:", response.commandType);
+    console.log("  - Éxito:", response.success);
+    console.log("  - Mensaje:", response.message);
+
+    // Buscar GPS
+    const gps = await getGPS(deviceId);
+
+    if (!gps) {
+      console.warn("⚠️ GPS no encontrado:", deviceId);
+      return { statusCode: 404, body: "GPS not found" };
+    }
+
+    console.log("✅ GPS encontrado:", gps.gpsId);
+
+    // Buscar comando pendiente
+    const command = await findPendingCommand(gps.gpsId, response.commandType);
+
+    if (!command) {
+      console.warn("⚠️ No se encontró comando pendiente");
+      console.warn("   Esto puede ser normal si:");
+      console.warn("   - El comando ya fue procesado");
+      console.warn("   - El GPS envió respuesta sin comando");
+      console.warn("   - El comando expiró (timeout)");
+      
+      return { 
+        statusCode: 200, 
+        body: JSON.stringify({ 
+          message: "Respuesta recibida pero sin comando pendiente",
+          commandType: response.commandType,
+          rsp: rsp
+        })
+      };
+    }
+
+    console.log("✅ Comando encontrado:", command.commandId);
+    console.log("   Tipo:", command.command);
+    console.log("   Creado:", command.createdAt);
+
+    // Actualizar comando
+    if (response.success) {
+      await updateCommandStatus(
+        command.commandId,
+        'executed',
+        {
+          success: true,
+          message: response.message,
+          rsp: rsp,
+          data: response.data,
+          responseTime: new Date().toISOString()
+        }
+      );
+      console.log(✅ Comando {command.commandId} → EJECUTADO);
+    } else {
+      await updateCommandStatus(
+        command.commandId,
+        'failed',
+        {
+          success: false,
+          error: response.message,
+          rsp: rsp,
+          responseTime: new Date().toISOString()
+        }
+      );
+      console.log(❌ Comando {command.commandId} → FALLIDO);
+    }
+
+    return { 
+      statusCode: 200, 
+      body: JSON.stringify({ 
+        message: "Respuesta procesada correctamente",
+        commandId: command.commandId,
+        status: response.success ? 'executed' : 'failed'
+      })
+    };
+
+  } catch (error) {
+    console.error("❌ Error procesando respuesta:", error);
+    return { statusCode: 500, body: error.message };
+  }
+}
+
+/**
+ * ✅ Parsear respuesta de comando Teltonika
+ */
+function parseCommandResponse(event) {
+  try {
+    const rsp = event.RSP || event.state?.reported?.RSP;
+    
+    if (!rsp) {
+      console.error("❌ No se encontró campo RSP");
+      return null;
+    }
+
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("📋 ANALIZANDO RSP");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log(rsp);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // Detectar tipo de comando desde RSP
+    const commandType = detectCommandTypeFromRSP(rsp);
+    
+    // Determinar si fue exitoso
+    const success = isSuccessfulResponse(rsp);
+
+    console.log("→ Comando detectado:", commandType);
+    console.log("→ Exitoso:", success);
+
+    return {
+      commandType: commandType,
+      success: success,
+      message: rsp,
+      data: parseRSPData(rsp),
+      timestamp: new Date().toISOString()
+    };
+
+  } catch (error) {
+    console.error("❌ Error parseando RSP:", error);
+    return null;
+  }
+}
+
+/**
+ * ✅ Detectar tipo de comando desde RSP
+ */
+function detectCommandTypeFromRSP(rsp) {
+  const lower = rsp.toLowerCase();
+
+  // getinfo - Respuesta típica con RTC, Init, UpTime, etc.
+  if (lower.includes('rtc:') && lower.includes('uptime:')) {
+    console.log("  ✓ Patrón detectado: getinfo (RTC + UpTime)");
+    return 'request_status';
+  }
+
+  // getver - Versión de firmware
+  if (lower.includes('ver:') || lower.includes('firmware')) {
+    console.log("  ✓ Patrón detectado: getver");
+    return 'get_version';
+  }
+
+  // getgps - Estado GPS
+  if (lower.includes('lat:') && lower.includes('lon:')) {
+    console.log("  ✓ Patrón detectado: getgps");
+    return 'get_gps_status';
+  }
+
+  // getrecord - Registros
+  if (lower.includes('record') || lower.includes('rec:')) {
+    console.log("  ✓ Patrón detectado: getrecord");
+    return 'get_records';
+  }
+
+  // setdigout - Cambio de salidas digitales
+  if (lower.includes('dout:') || lower.includes('output')) {
+    console.log("  ✓ Patrón detectado: setdigout");
+    
+    if (lower.includes('dout:1') || lower.includes('output 1')) {
+      return 'block_engine';
+    }
+    if (lower.includes('dout:2')) {
+      return 'activate_alarm';
+    }
+    if (lower.includes('dout:3')) {
+      return 'flash_lights';
+    }
+    
+    return 'setdigout';
+  }
+
+  // setparam - Cambio de parámetros
+  if (lower.includes('param') || lower.includes('parameter')) {
+    console.log("  ✓ Patrón detectado: setparam");
+    
+    if (lower.includes('2001') || lower.includes('interval')) {
+      return 'change_report_interval';
+    }
+    if (lower.includes('11001') || lower.includes('speed')) {
+      return 'set_speed_limit';
+    }
+    
+    return 'change_configuration';
+  }
+
+  // OK/Success genérico
+  if (lower === 'ok' || lower === 'success') {
+    console.log("  ✓ Respuesta genérica: OK");
+    return 'unknown';
+  }
+
+  console.log("  ⚠️ No se pudo detectar tipo de comando");
+  return 'unknown';
+}
+
+/**
+ * ✅ Determinar si la respuesta fue exitosa
+ */
+function isSuccessfulResponse(rsp) {
+  const lower = rsp.toLowerCase();
+
+  // Indicadores de error
+  if (lower.includes('error')) return false;
+  if (lower.includes('fail')) return false;
+  if (lower.includes('unknown')) return false;
+  if (lower.includes('invalid')) return false;
+  if (lower.includes('denied')) return false;
+
+  // Si tiene datos válidos, es exitoso
+  if (lower.includes('rtc:')) return true;
+  if (lower.includes('uptime:')) return true;
+  if (lower.includes('ok')) return true;
+  if (lower.includes('success')) return true;
+
+  return true;
+}
+
+/**
+ * ✅ Parsear datos útiles del RSP
+ */
+function parseRSPData(rsp) {
+  const data = {};
+
+  try {
+    const pairs = rsp.split(' ');
+    
+    for (const pair of pairs) {
+      if (pair.includes(':')) {
+        const [key, value] = pair.split(':');
+        data[key] = value;
+      }
+    }
+
+    console.log("📊 Datos extraídos del RSP:", JSON.stringify(data, null, 2));
+
+  } catch (error) {
+    console.error("Error parseando datos RSP:", error);
+  }
+
+  return data;
+}
+
+/**
+ * ✅ Buscar comando pendiente
+ */
+async function findPendingCommand(gpsId, commandType) {
+  try {
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("🔍 BUSCANDO COMANDO PENDIENTE");
+    console.log("GPS ID:", gpsId);
+    console.log("Tipo detectado:", commandType);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // ESTRATEGIA 1: Si conocemos el tipo, buscar por tipo exacto
+    if (commandType && commandType !== 'unknown') {
+      console.log("→ Buscando por tipo específico:", commandType);
+      
+      const result = await dynamodb.query({
+        TableName: TABLE_COMANDOS,
+        IndexName: 'gpsId-createdAt-index',
+        KeyConditionExpression: 'gpsId = :gpsId',
+        FilterExpression: '#status = :sent AND command = :command',
+        ExpressionAttributeNames: {
+          '#status': 'status'
+        },
+        ExpressionAttributeValues: {
+          ':gpsId': gpsId,
+          ':sent': 'sent',
+          ':command': commandType
+        },
+        ScanIndexForward: false,
+        Limit: 1
+      }).promise();
+
+      if (result.Items && result.Items.length > 0) {
+        console.log("✅ Encontrado por tipo exacto:", result.Items[0].commandId);
+        return result.Items[0];
+      }
+
+      console.log("⚠️ No encontrado por tipo, buscando más reciente...");
+    }
+
+    // ESTRATEGIA 2: Buscar el comando MÁS RECIENTE en estado 'sent'
+    console.log("→ Buscando comando más reciente (cualquier tipo)");
+    
+    const result = await dynamodb.query({
+      TableName: TABLE_COMANDOS,
+      IndexName: 'gpsId-createdAt-index',
+      KeyConditionExpression: 'gpsId = :gpsId',
+      FilterExpression: '#status = :sent',
+      ExpressionAttributeNames: {
+        '#status': 'status'
+      },
+      ExpressionAttributeValues: {
+        ':gpsId': gpsId,
+        ':sent': 'sent'
+      },
+      ScanIndexForward: false,
+      Limit: 1
+    }).promise();
+
+    if (result.Items && result.Items.length > 0) {
+      const cmd = result.Items[0];
+      const ageSeconds = (Date.now() - new Date(cmd.sentAt).getTime()) / 1000;
+      
+      console.log("✅ Comando más reciente encontrado:");
+      console.log("   ID:", cmd.commandId);
+      console.log("   Tipo:", cmd.command);
+      console.log("   Edad:", Math.round(ageSeconds), "segundos");
+      
+      if (ageSeconds > 300) {
+        console.warn("⚠️ Comando antiguo (>5min), podría ser timeout");
+      }
+      
+      return cmd;
+    }
+
+    console.warn("⚠️ No se encontraron comandos en estado 'sent'");
+    return null;
+
+  } catch (error) {
+    console.error("❌ Error buscando comando:", error);
+    return null;
+  }
+}
+
+/**
+ * ✅ Actualizar estado del comando
+ */
+async function updateCommandStatus(commandId, status, responseData) {
+  const now = new Date().toISOString();
+  const statusField = {status}At;
+
+  try {
+    await dynamodb.update({
+      TableName: TABLE_COMANDOS,
+      Key: { commandId: commandId },
+      UpdateExpression: 
+        SET #status = :status,
+            #statusField = :now,
+            #response = :response
+        ,
+      ExpressionAttributeNames: {
+        '#status': 'status',
+        '#statusField': statusField,
+        '#response': 'response'
+      },
+      ExpressionAttributeValues: {
+        ':status': status,
+        ':now': now,
+        ':response': responseData
+      }
+    }).promise();
+
+    console.log(✅ Comando {commandId} actualizado:);
+    console.log(   Estado: {status});
+    console.log(   Timestamp: {now});
+
+  } catch (error) {
+    console.error(❌ Error actualizando comando {commandId}:, error);
+    throw error;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// PROCESAMIENTO DE DATOS DE UBICACIÓN
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * ✅ Procesar datos de ubicación
+ */
+async function processLocationData(event) {
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("📍 PROCESANDO DATOS DE UBICACIÓN");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  const gpsData = await paseDataEvent(event);
+
+  if (!gpsData) {
+    console.error("❌ No se pudieron parsear datos GPS");
+    return { statusCode: 400, body: "Error parseando datos GPS" };
+  }
+
+  console.log("✅ Datos GPS parseados");
+
+  const gps = await getGPS(gpsData.deviceId);
+
+  if (!gps) {
+    console.warn("⚠️ GPS no registrado:", gpsData.deviceId);
+    return { statusCode: 400, body: "GPS no registrado" };
+  }
+
+  const vehicleId = gps.vehicleId;
+  const gpsId = gps.gpsId;
+
+  if (!isValidCoordinates(gpsData.latitude, gpsData.longitude)) {
+    console.error("❌ Coordenadas inválidas");
+    return { statusCode: 400, body: "Coordenadas inválidas" };
+  }
+
+  await saveToLocationService(gpsData);
+  console.log("✅ Location Service");
+
+  await saveCoordinate(gpsId, vehicleId, gpsData, event?.state?.reported);
+  console.log("✅ Coordenada guardada");
+
+  // ✅ NUEVO: Detectar cambio de ignición ANTES de actualizar GPS
+  const previousState = await getLastGPSState(gpsId);
+  await detectIgnitionChange(gpsId, vehicleId, event?.state?.reported, previousState);
+
+  await updateGPSLastPosition(gpsId, gpsData, event?.state?.reported);
+  console.log("✅ GPS actualizado");
+
+  if (vehicleId && event?.state?.reported?.["16"]) {
+    await updateVehicleOdometer(vehicleId, event.state.reported["16"]);
+    console.log("✅ Vehículo actualizado");
+  }
+
+  await detectEvents(gpsId, vehicleId, gpsData, event?.state?.reported);
+
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      message: "Ubicación procesada",
+      device: gpsData.deviceId
+    }),
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+// DETECCIÓN DE EVENTOS Y NOTIFICACIONES
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * ✅ NUEVO: Detectar cambio de ignición y notificar
+ */
+async function detectIgnitionChange(gpsId, vehicleId, currentData, previousState) {
+  try {
+    if (!currentData) {
+      console.log("⚠️ No hay datos actuales para detectar ignición");
+      return;
+    }
+
+    const currentIgnition = currentData["239"] === 1;
+    const previousIgnition = previousState?.ignition || false;
+
+    console.log("🔍 Verificando cambio de ignición:");
+    console.log("  - Estado anterior:", previousIgnition);
+    console.log("  - Estado actual:", currentIgnition);
+
+    // Si NO hay cambio, salir
+    if (currentIgnition === previousIgnition) {
+      console.log("  → Sin cambio");
+      return;
+    }
+
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("🔔 CAMBIO DE IGNICIÓN DETECTADO");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    const eventType = currentIgnition ? 'ignition_on' : 'ignition_off';
+    const eventDescription = currentIgnition ? 
+      '🔑 Vehículo encendido' : 
+      '🔒 Vehículo apagado';
+
+    // Obtener información del vehículo
+    const vehicle = await getVehicle(vehicleId);
+    const vehicleName = vehicle?.name || vehicle?.plate || vehicleId;
+
+    // Parsear coordenadas
+    let latitude = 0;
+    let longitude = 0;
+    
+    if (currentData.latlng) {
+      const [lat, lon] = currentData.latlng.split(',');
+      latitude = parseFloat(lat) || 0;
+      longitude = parseFloat(lon) || 0;
+    }
+
+    // Guardar evento en DynamoDB
+    const event = {
+      eventoId: evt {Date.now()}-{randomId()},
+      gpsId: gpsId,
+      vehicleId: vehicleId,
+      vehicleName: vehicleName,
+      eventType: eventType,
+      description: eventDescription,
+      timestamp: Date.now(),
+      datetime: new Date().toISOString(),
+      
+      // Datos del vehículo
+      location: {
+        latitude: latitude,
+        longitude: longitude,
+      },
+      
+      // Datos adicionales
+      ignitionState: currentIgnition,
+      speed: currentData.sp || 0,
+      batteryVoltage: currentData["67"] || 0,
+      externalVoltage: currentData["66"] || 0,
+      gsmSignal: currentData["21"] || 0,
+      satellites: currentData.sat || 0,
+      
+      // Metadata
+      notified: false,
+      createdAt: new Date().toISOString(),
+      ttl: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+    };
+
+    await dynamodb.put({
+      TableName: TABLE_EVENTOS,
+      Item: event
+    }).promise();
+
+    console.log("✅ Evento guardado:", event.eventoId);
+
+    // Enviar notificación
+   // await sendIgnitionNotification(event);
+
+    console.log("✅ Notificación enviada");
+
+  } catch (error) {
+    console.error("❌ Error detectando cambio de ignición:", error);
+  }
+}
+
+/**
+ * ✅ NUEVO: Enviar notificación de ignición via SNS
+ */
+
+/**
+ * ✅ CORREGIDO: Enviar notificación de ignición via SNS
+ */
+async function sendIgnitionNotification(eventData) {
+  try {
+    const emoji = eventData.eventType === 'ignition_on' ? '🔑' : '🔒';
+    const action = eventData.eventType === 'ignition_on' ? 'ENCENDIDO' : 'APAGADO';
+    const time = new Date(eventData.datetime).toLocaleString('es-CO', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // Mensaje para Email (detallado)
+    const emailMessage = Vehículo: {eventData.vehicleName} Estado: {eventData.description} Fecha y Hora: {time}.trim();
+
+    console.log("📤 Enviando notificación SNS...");
+    console.log("   Topic ARN:", SNS_TOPIC_ARN);
+
+    // ✅ CORREGIDO: Sin MessageAttributes personalizados
+    const params = {
+      TopicArn: SNS_TOPIC_ARN,
+      Subject: {emoji} Vehículo {action} - {eventData.vehicleName},
+      Message: emailMessage,
+      // ✅ Removidos MessageAttributes que causaban error
+    };
+
+    const result = await sns.publish(params).promise();
+
+    console.log("✅ Notificación SNS enviada:", result.MessageId);
+
+    return result;
+
+  } catch (error) {
+    console.error("❌ Error enviando notificación SNS:", error);
+    console.error("   Verifica:");
+    console.error("   1. Variable SNS_TOPIC_ARN está configurada");
+    console.error("   2. Lambda tiene permisos SNS");
+    console.error("   3. Topic ARN es correcto");
+    throw error;
+  }
+}
+
+/**
+ * ✅ NUEVO: Obtener vehículo
+ */
+async function getVehicle(vehicleId) {
+  try {
+    const result = await dynamodb.get({
+      TableName: TABLE_VEHICULOS,
+      Key: { vehicleId: vehicleId }
+    }).promise();
+
+    return result.Item || null;
+  } catch (error) {
+    console.error("Error obteniendo vehículo:", error);
+    return null;
+  }
+}
+
+/**
+ * ✅ NUEVO: Obtener último estado conocido del GPS
+ */
+async function getLastGPSState(gpsId) {
+  try {
+    const result = await dynamodb.get({
+      TableName: TABLE_GPS,
+      Key: { gpsId: gpsId }
+    }).promise();
+
+    return result.Item || null;
+  } catch (error) {
+    console.error("Error obteniendo GPS:", error);
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// FUNCIONES DE PARSEO Y VALIDACIÓN
+// ════════════════════════════════════════════════════════════════
+
+function parseTeltonikaDeviceShadow(event) {
+  try {
+    const reported = event.state.reported;
+    const latlngString = reported.latlng;
+    
+    if (!latlngString) {
+      return null;
+    }
+
+    const [latStr, lonStr] = latlngString.split(",");
+
+    return {
+      deviceId: event.deviceId,
+      latitude: parseFloat(latStr),
+      longitude: parseFloat(lonStr),
+      altitude: reported.alt || 0,
+      speed: reported.sp || 0,
+      heading: reported.ang || 0,
+      satellites: reported.sat || 0,
+      timestamp: new Date().toISOString(),
+      accuracy: 10,
+    };
+  } catch (error) {
+    console.error("❌ Error parseando Device Shadow:", error);
+    return null;
+  }
+}
+
+function parseTeltonikaDirectReport(event) {
+  try {
+    const [latStr, lonStr] = event.latlng.split(",");
+    return {
+      deviceId: event.deviceId,
+      latitude: parseFloat(latStr),
+      longitude: parseFloat(lonStr),
+      altitude: event.alt || 0,
+      speed: event.sp || 0,
+      heading: event.ang || 0,
+      satellites: event.sat || 0,
+      timestamp: new Date().toISOString(),
+      accuracy: 10,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function paseDataEvent(event) {
+  if (event.state?.reported) {
+    return parseTeltonikaDeviceShadow(event);
+  } else if (event.latlng) {
+    return parseTeltonikaDirectReport(event);
+  }
+  return null;
+}
+
+function isValidCoordinates(lat, lon) {
+  return lat && lon && !isNaN(lat) && !isNaN(lon) && 
+         lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+
+// ════════════════════════════════════════════════════════════════
+// FUNCIONES DE ALMACENAMIENTO
+// ════════════════════════════════════════════════════════════════
+
+async function saveToLocationService(gpsData) {
+  const params = {
+    TrackerName: TRACKER_NAME,
+    Updates: [{
+      DeviceId: gpsData.deviceId,
+      Position: [gpsData.longitude, gpsData.latitude],
+      SampleTime: gpsData.timestamp,
+      Accuracy: { Horizontal: gpsData.accuracy },
+      PositionProperties: {
+        speed: String(gpsData.speed),
+        heading: String(gpsData.heading),
+        altitude: String(gpsData.altitude),
+      },
+    }],
+  };
+
+  return await location.batchUpdateDevicePosition(params).promise();
+}
+
+async function getGPS(deviceId) {
+  const result = await dynamodb.query({
+    TableName: TABLE_GPS,
+    IndexName: "deviceId-index",
+    KeyConditionExpression: "deviceId = :deviceId",
+    ExpressionAttributeValues: { ":deviceId": deviceId },
+    Limit: 1,
+  }).promise();
+
+  return result.Items?.[0] || null;
+}
+
+async function saveCoordinate(gpsId, vehicleId, gpsData, rawData) {
+  const timestamp = new Date(gpsData.timestamp).getTime();
+  const date = new Date(gpsData.timestamp).toISOString().split("T")[0];
+  const dateObj = new Date(gpsData.timestamp);
+
+  const item = {
+    coordenadaId: randomId(),
+    gpsId,
+    vehicleId,
+    timestamp,
+    date,
+    hour: dateObj.getUTCHours(),
+    dayOfWeek: dateObj.getUTCDay(),
+    latitude: gpsData.latitude,
+    longitude: gpsData.longitude,
+    altitude: gpsData.altitude,
+    speed: gpsData.speed,
+    heading: gpsData.heading,
+    satellites: gpsData.satellites,
+    accuracy: gpsData.accuracy,
+    ignition: rawData?.["239"] === 1,
+    movement: rawData?.["240"] === 1,
+    odometer: rawData?.["16"] || 0,
+    batteryVoltage: rawData?.["67"] || 0,
+    externalVoltage: rawData?.["66"] || 0,
+    gsmSignal: rawData?.["21"] || 0,
+    io: rawData,
+    createdAt: new Date().toISOString(),
+    processedAt: new Date().toISOString(),
+    ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60,
+  };
+
+  await dynamodb.put({ TableName: TABLE_COORDENADAS, Item: item }).promise();
+}
+
+async function updateGPSLastPosition(gpsId, gpsData, rawData) {
+  await dynamodb.update({
+    TableName: TABLE_GPS,
+    Key: { gpsId },
+    UpdateExpression: SET lastLatitude = :lat, lastLongitude = :lon, 
+                       lastSpeed = :speed, lastHeading = :heading, 
+                       lastAltitude = :alt, lastSatellites = :sat, 
+                       lastUpdate = :update, updatedAt = :now, 
+                       #online = :online, ignition = :ignition,
+    ExpressionAttributeNames: { "#online": "online" },
+    ExpressionAttributeValues: {
+      ":lat": gpsData.latitude,
+      ":lon": gpsData.longitude,
+      ":speed": gpsData.speed,
+      ":heading": gpsData.heading,
+      ":alt": gpsData.altitude,
+      ":sat": gpsData.satellites,
+      ":update": gpsData.timestamp,
+      ":now": new Date().toISOString(),
+      ":online": true,
+      ":ignition": rawData?.["239"] === 1 || false,
+    },
+  }).promise();
+}
+
+async function updateVehicleOdometer(vehicleId, odometer) {
+  await dynamodb.update({
+    TableName: TABLE_VEHICULOS,
+    Key: { vehicleId },
+    UpdateExpression: "SET mileage = :mileage, updatedAt = :now",
+    ExpressionAttributeValues: {
+      ":mileage": odometer,
+      ":now": new Date().toISOString(),
+    },
+  }).promise();
+}
+
+async function detectEvents(gpsId, vehicleId, gpsData, rawData) {
+  if (gpsData.speed > 80) {
+    console.log("⚠️ Exceso de velocidad");
+  }
+}
+
+function randomId() {
+  return Math.random().toString(36).substring(2, 10);
+}`,
+      },
+      {
+        title: "IoT Core — Topic Rules (Terraform HCL)",
+        language: "hcl",
+        code: `resource "aws_iot_topic_rule" "process_gps_data" {
+  name        = "\${var.project_name}_ProcessGPSData"
+  enabled     = true
+  description = "Routes GPS location data to Lambda"
+
+  sql         = <<-SQL
+    SELECT *,
+           topic(2) as deviceId,
+           clientId() as clientId
+    FROM 'vehicles/+/data'
+    WHERE NOT isUndefined(latlng)
+  SQL
+  sql_version = "2016-03-23"
+
+  lambda {
+    function_arn = var.process_gps_lambda_arn
+  }
+}
+
+resource "aws_iot_topic_rule" "process_command_response" {
+  name        = "\${var.project_name}_ProcessCommandResponse"
+  enabled     = true
+  description = "Routes GPS command responses to Lambda"
+
+  sql         = <<-SQL
+    SELECT *,
+           topic(2) as deviceId,
+           clientId() as clientId
+    FROM 'vehicles/+/data'
+    WHERE NOT isUndefined(RSP)
+  SQL
+  sql_version = "2016-03-23"
+
+  lambda {
+    function_arn = var.process_gps_lambda_arn
+  }
+}
+
+resource "aws_lambda_permission" "iot_invoke_process_gps" {
+  statement_id  = "AllowIoTInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = var.process_gps_lambda_name
+  principal     = "iot.amazonaws.com"
+  source_arn    = aws_iot_topic_rule.process_gps_data.arn
+}`,
+      },
+      {
+        title: "DynamoDB — tablas con TTL y GSIs (Terraform HCL)",
+        language: "hcl",
+        code: `# Tabla de coordenadas históricas con TTL automático (90 días)
+resource "aws_dynamodb_table" "coordenadas" {
+  name           = "Coordenadas"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "coordenadaId"
+
+  attribute {
+    name = "coordenadaId"
+    type = "S"
+  }
+  attribute {
+    name = "gpsId"
+    type = "S"
+  }
+  attribute {
+    name = "timestamp"
+    type = "N"
+  }
+
+  global_secondary_index {
+    name               = "gpsId-timestamp-index"
+    hash_key           = "gpsId"
+    range_key          = "timestamp"
+    projection_type    = "ALL"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+}
+
+# Tabla de estado actual del GPS (updated en cada mensaje)
+resource "aws_dynamodb_table" "gps" {
+  name         = "GPS"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "gpsId"
+
+  attribute { name = "gpsId";    type = "S" }
+  attribute { name = "deviceId"; type = "S" }
+  attribute { name = "vehicleId"; type = "S" }
+
+  global_secondary_index {
+    name            = "deviceId-index"
+    hash_key        = "deviceId"
+    projection_type = "ALL"
+  }
+  global_secondary_index {
+    name            = "vehicleId-index"
+    hash_key        = "vehicleId"
+    projection_type = "ALL"
+  }
+}`,
+      },
+      {
+        title: "IoT Policy — privilegio mínimo por dispositivo",
+        language: "json",
+        code: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "iot:Connect",
+      "Resource": "arn:aws:iot:us-east-1:ACCOUNT_ID:client/\${iot:Connection.Thing.ThingName}"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Publish",
+      "Resource": [
+        "arn:aws:iot:us-east-1:ACCOUNT_ID:topic/vehicles/\${iot:Connection.Thing.ThingName}/data",
+        "arn:aws:iot:us-east-1:ACCOUNT_ID:topic/vehicles/\${iot:Connection.Thing.ThingName}/response"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Subscribe",
+      "Resource": "arn:aws:iot:us-east-1:ACCOUNT_ID:topicfilter/vehicles/\${iot:Connection.Thing.ThingName}/commands"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Receive",
+      "Resource": "arn:aws:iot:us-east-1:ACCOUNT_ID:topic/vehicles/\${iot:Connection.Thing.ThingName}/commands"
+    }
+  ]
+}`,
+      },
+      {
+        title: "Despliegue completo — comandos Terraform",
+        language: "bash",
+        code: `# 1. Inicializar y desplegar la infraestructura
+cd infrastructure/terraform/05-gps-vehicle-tracking
+terraform init
+terraform plan -var="alert_email=tu@email.com" -var="alert_phone=+573001234567"
+terraform apply -var="alert_email=tu@email.com" -var="alert_phone=+573001234567"
+
+# 2. Ver los outputs clave
+terraform output
+# iot_endpoint              = "a28bbd2b4768x7-ats.iot.us-east-1.amazonaws.com"
+# process_gps_lambda_name   = "fleet-tracker-ProcessGPSData"
+# check_timeout_lambda_name = "fleet-tracker-CheckCommandTimeout"
+
+# 3. Crear certificado en AWS Console (post-apply)
+#    IoT Core → Manage → Security → Certificates → Create certificate
+#    Descargar: device.pem.crt, private.pem.key, AmazonRootCA1.pem
+#    Adjuntar policy: VehicleGPSPolicy
+#    Adjuntar thing: {IMEI del dispositivo}
+
+# 4. Configurar Teltonika Configurator
+#    GPRS → Server: a28bbd2b4768x7-ats.iot.us-east-1.amazonaws.com:8883
+#    Protocol: MQTT | TLS: TLS/DTLS | Client ID: {IMEI}
+#    Data Topic: vehicles/%imei%/data
+#    Command Topic: vehicles/%imei%/commands
+#    Codec: JSON | Interval: 10s
+
+# 5. Verificar logs en CloudWatch
+aws logs tail /aws/lambda/fleet-tracker-ProcessGPSData --follow
+
+# 6. Probar publicación manual via AWS CLI
+aws iot-data publish \\
+  --topic "vehicles/863238073517528/data" \\
+  --payload '{"latlng":"10.9639,-74.7964","sp":0,"239":1,"sat":8}' \\
+  --cli-binary-format raw-in-base64-out`,
+      },
+    ],
+  },
 ];
 
 export function getArchitecture(slug: string): Architecture | undefined {

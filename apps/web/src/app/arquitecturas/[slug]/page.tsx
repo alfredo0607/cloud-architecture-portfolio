@@ -23,9 +23,22 @@ export async function generateMetadata({
 }
 
 const statusConfig = {
-  live: { label: "Live", className: "bg-green-900/40 text-green-400 border border-green-800" },
-  building: { label: "Building", className: "bg-aws/10 text-aws border border-aws/30" },
-  planned: { label: "Planned", className: "bg-surface text-muted border border-border-subtle" },
+  live: {
+    label: "Live",
+    className: "bg-green-900/40 text-green-400 border border-green-800",
+  },
+  building: {
+    label: "Building",
+    className: "bg-aws/10 text-aws border border-aws/30",
+  },
+  planned: {
+    label: "Planned",
+    className: "bg-surface text-muted border border-border-subtle",
+  },
+  "In development": {
+    label: "In Development",
+    className: "bg-blue-900/40 text-blue-400 border border-blue-800",
+  },
 };
 
 export default async function ArchitectureDetailPage({
@@ -60,7 +73,9 @@ export default async function ArchitectureDetailPage({
         <div className="mb-16">
           <div className="flex items-center gap-3 mb-6 flex-wrap">
             <span className="font-mono text-aws text-sm">{arch.number}</span>
-            <span className={`text-xs font-mono px-2 py-1 rounded-full ${status.className}`}>
+            <span
+              className={`text-xs font-mono px-2 py-1 rounded-full ${status.className}`}
+            >
               {status.label}
             </span>
             <span className="text-xs font-mono px-2 py-1 rounded-full bg-aws/10 border border-aws/30 text-aws">
@@ -71,7 +86,9 @@ export default async function ArchitectureDetailPage({
           <h1 className="text-4xl md:text-6xl font-bold text-foreground mb-4 leading-tight">
             {arch.title}
           </h1>
-          <p className="text-muted text-xl leading-relaxed max-w-3xl mb-8">{arch.tagline}</p>
+          <p className="text-muted text-xl leading-relaxed max-w-3xl mb-8">
+            {arch.tagline}
+          </p>
 
           {/* CTA buttons */}
           <div className="flex gap-3 flex-wrap mb-8">
@@ -127,13 +144,17 @@ export default async function ArchitectureDetailPage({
               <p className="text-xs font-mono text-muted uppercase tracking-widest mb-3">
                 Problema
               </p>
-              <p className="text-foreground/80 leading-relaxed">{arch.problem}</p>
+              <p className="text-foreground/80 leading-relaxed">
+                {arch.problem}
+              </p>
             </div>
             <div className="bg-surface border border-aws/20 rounded-xl p-6">
               <p className="text-xs font-mono text-aws uppercase tracking-widest mb-3">
                 Solución
               </p>
-              <p className="text-foreground/80 leading-relaxed">{arch.solution}</p>
+              <p className="text-foreground/80 leading-relaxed">
+                {arch.solution}
+              </p>
             </div>
           </div>
         </Section>
@@ -166,11 +187,17 @@ export default async function ArchitectureDetailPage({
             {arch.steps.map((step) => (
               <div key={step.n} className="flex gap-5">
                 <div className="shrink-0 w-8 h-8 rounded-full bg-aws/10 border border-aws/30 flex items-center justify-center">
-                  <span className="text-aws font-mono text-sm font-bold">{step.n}</span>
+                  <span className="text-aws font-mono text-sm font-bold">
+                    {step.n}
+                  </span>
                 </div>
                 <div className="pt-0.5">
-                  <h3 className="font-semibold text-foreground mb-2">{step.title}</h3>
-                  <p className="text-muted text-sm leading-relaxed">{step.detail}</p>
+                  <h3 className="font-semibold text-foreground mb-2">
+                    {step.title}
+                  </h3>
+                  <p className="text-muted text-sm leading-relaxed">
+                    {step.detail}
+                  </p>
                 </div>
               </div>
             ))}
@@ -189,10 +216,14 @@ export default async function ArchitectureDetailPage({
                   <span className="text-xs font-mono bg-aws/10 text-aws border border-aws/30 px-2 py-0.5 rounded shrink-0">
                     AWS
                   </span>
-                  <p className="font-semibold text-foreground text-sm">{svc.name}</p>
+                  <p className="font-semibold text-foreground text-sm">
+                    {svc.name}
+                  </p>
                 </div>
                 <p className="text-xs text-muted mb-2">{svc.role}</p>
-                <p className="text-xs text-foreground/60 leading-relaxed">{svc.detail}</p>
+                <p className="text-xs text-foreground/60 leading-relaxed">
+                  {svc.detail}
+                </p>
               </div>
             ))}
           </div>
@@ -206,13 +237,18 @@ export default async function ArchitectureDetailPage({
                 key={d.title}
                 className="bg-surface border border-border-subtle rounded-xl p-6"
               >
-                <h3 className="font-semibold text-foreground mb-4">{d.title}</h3>
+                <h3 className="font-semibold text-foreground mb-4">
+                  {d.title}
+                </h3>
+
                 <div className="grid md:grid-cols-2 gap-4 mb-4">
-                  <div className="bg-aws/5 border border-aws/20 rounded-lg p-4">
+                  <div className="bg-foreground/5 border border-border-subtle rounded-lg p-4">
                     <p className="text-xs font-mono text-aws uppercase tracking-widest mb-2">
                       Elegido
                     </p>
-                    <p className="text-foreground text-sm font-medium">{d.chosen}</p>
+                    <p className="text-foreground text-sm font-medium">
+                      {d.chosen}
+                    </p>
                   </div>
                   <div className="bg-background border border-border-subtle rounded-lg p-4">
                     <p className="text-xs font-mono text-muted uppercase tracking-widest mb-2">
@@ -232,7 +268,9 @@ export default async function ArchitectureDetailPage({
                   <p className="text-xs font-mono text-muted uppercase tracking-widest mb-2">
                     Razón
                   </p>
-                  <p className="text-sm text-foreground/80 leading-relaxed">{d.why}</p>
+                  <p className="text-sm text-foreground/80 leading-relaxed">
+                    {d.why}
+                  </p>
                 </div>
               </div>
             ))}
@@ -245,7 +283,10 @@ export default async function ArchitectureDetailPage({
             <div className="bg-surface border border-border-subtle rounded-xl p-6">
               <ul className="space-y-3">
                 {arch.security.map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-sm text-foreground/80"
+                  >
                     <span className="text-green-500 mt-0.5 shrink-0">✓</span>
                     {item}
                   </li>
@@ -258,7 +299,10 @@ export default async function ArchitectureDetailPage({
             <div className="bg-surface border border-border-subtle rounded-xl p-6">
               <ul className="space-y-3">
                 {arch.scalability.map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-sm text-foreground/80"
+                  >
                     <span className="text-aws mt-0.5 shrink-0">↑</span>
                     {item}
                   </li>
@@ -313,10 +357,17 @@ export default async function ArchitectureDetailPage({
         <Section title="Snippets de Código">
           <div className="flex flex-col gap-8">
             {arch.snippets.map((snippet) => (
-              <div key={snippet.title} className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+              <div
+                key={snippet.title}
+                className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+              >
                 <div className="flex items-center justify-between px-6 py-3 border-b border-border-subtle">
-                  <span className="text-sm font-medium text-foreground">{snippet.title}</span>
-                  <span className="text-xs font-mono text-muted">{snippet.language}</span>
+                  <span className="text-sm font-medium text-foreground">
+                    {snippet.title}
+                  </span>
+                  <span className="text-xs font-mono text-muted">
+                    {snippet.language}
+                  </span>
                 </div>
                 <div className="overflow-x-auto">
                   <pre className="p-6 text-xs font-mono text-foreground/85 leading-relaxed">

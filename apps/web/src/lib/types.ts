@@ -1,4 +1,4 @@
-export type Status = "live" | "building" | "planned";
+export type Status = "live" | "building" | "planned" | "In development";
 
 export type CodeSnippet = {
   title: string;
@@ -73,4 +73,5 @@ export type Project = {
   snippets: CodeSnippet[];
   githubUrl?: string;
   demoUrl?: string;
+  architectureSlugs?: string[];
 };

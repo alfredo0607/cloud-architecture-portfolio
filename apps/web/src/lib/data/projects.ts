@@ -1,27 +1,617 @@
 import type { Project } from "@/lib/types";
 
 export const projects: Project[] = [
+  // ── Proyectos reales ────────────────────────────────────────────────────────
+  {
+    slug: "aws-secure-content-distribution",
+    githubUrl: "https://github.com/alfredo0607/aws-secure-content-distribution",
+    demoUrl: "https://images-url-signature.alfredo-dominguez.dev/",
+    title: "AWS Secure Content Distribution",
+    tagline:
+      "Plataforma fullstack para subir archivos a S3 y servirlos con Signed URLs de CloudFront. Frontend en Astro + backend Node.js containerizado en EC2 + Docker.",
+    status: "live",
+    architectureSlugs: ["01-private-cdn", "04-container-backend"],
+    tags: [
+      "Astro",
+      "Node.js",
+      "Express",
+      "EC2",
+      "CloudFront",
+      "S3",
+      "Docker",
+      "Terraform",
+    ],
+    problem:
+      "Una plataforma necesita permitir a usuarios autenticados subir archivos a S3 y acceder a ellos de forma privada con URLs temporales, sin exponer el bucket directamente a Internet. El backend debe escalar bajo demanda sin gestionar servidores.",
+    solution:
+      "Frontend estático en Astro 6 que interactúa con una API REST en Express 5 containerizada en EC2 + Docker. El backend gestiona la subida a S3, lista archivos y genera Signed URLs de CloudFront firmadas con Key Pair RSA. El bucket es completamente privado con OAC; CloudFront valida la firma en el edge antes de servir el contenido.",
+    diagram: `
+  Browser (Astro SSG)
+     │
+     ├─ POST /api/v1/files/upload         → sube a S3 (multipart, sharp compresión)
+     ├─ GET  /api/v1/files                → lista archivos del bucket
+     ├─ GET  /api/v1/files/:key/signed-url → genera Signed URL de CloudFront
+     └─ DELETE /api/v1/files/:key         → elimina objeto S3
+          │
+          ▼
+  ┌──────────────────────────────────────────────────────┐
+  │  EC2 + Docker (Node.js + Express 5)                   │
+  │  • sharp: compresión de imágenes antes de subir      │
+  │  • @aws-sdk/cloudfront-signer: firma RSA de URLs     │
+  │  • helmet + rate-limit: seguridad HTTP               │
+  └───────────────┬─────────────────────────┬────────────┘
+                  │                         │
+                  ▼                         ▼
+  ┌──────────────────────┐    ┌──────────────────────────┐
+  │  S3 Bucket (privado) │    │  CloudFront Distribution  │
+  │  OAC + SSE-KMS       │    │  Signed URLs (RSA Key)    │
+  │  BlockPublicAccess   │    │  OAC SigV4 → S3           │
+  └──────────────────────┘    └──────────────────────────┘`,
+    steps: [
+      {
+        n: 1,
+        title: "Frontend — Zona de drag & drop (Astro + Vanilla JS)",
+        detail:
+          "El frontend es un sitio estático generado con Astro 6 + Tailwind CSS v4. Sin frameworks de componentes — toda la interactividad se maneja con JavaScript nativo. La zona de drag & drop valida el tamaño del archivo en cliente (máx. 10 MB) antes de enviarlo.",
+      },
+      {
+        n: 2,
+        title: "Backend — Upload a S3 con compresión automática",
+        detail:
+          "El backend (Express 5) recibe el archivo via multipart/form-data. Si es una imagen, sharp la comprime antes de subir a S3: 30% calidad para >2MB, 60% para 1-2MB, sin pérdida para <1MB. Esto reduce el costo de almacenamiento y la latencia de descarga.",
+      },
+      {
+        n: 3,
+        title: "Generación de Signed URL de CloudFront",
+        detail:
+          "El backend obtiene la clave privada RSA del CloudFront Key Pair desde variables de entorno (en producción, desde Secrets Manager). Usa @aws-sdk/cloudfront-signer para generar una Signed URL con expiración configurable (15 min, 1h, 24h, 7 días). CloudFront valida la firma en el edge antes de hacer el request a S3.",
+      },
+      {
+        n: 4,
+        title: "Acceso privado a S3 vía CloudFront OAC",
+        detail:
+          "El bucket S3 tiene BlockPublicAccess habilitado en las 4 opciones. La bucket policy solo permite GetObject al ARN exacto del distribution de CloudFront. CloudFront firma cada request a S3 con SigV4 (OAC) — el bucket rechaza cualquier request que no venga de este distribution.",
+      },
+    ],
+    techStack: [
+      {
+        category: "Frontend",
+        items: [
+          "Astro 6.x",
+          "Tailwind CSS 4.x",
+          "Vanilla JavaScript",
+          "Node.js ≥ 22",
+          "pnpm 11",
+        ],
+      },
+      {
+        category: "Backend",
+        items: [
+          "Node.js ≥ 20",
+          "Express 5.2.1",
+          "AWS SDK v3",
+          "sharp 0.34.5",
+          "express-fileupload",
+          "helmet",
+          "express-rate-limit",
+          "nanoid",
+        ],
+      },
+      {
+        category: "Infraestructura AWS",
+        items: [
+          "EC2",
+          "S3 (privado + OAC)",
+          "CloudFront + Signed URLs",
+          "KMS (SSE-KMS)",
+          "Secrets Manager",
+          "Terraform",
+        ],
+      },
+    ],
+    decisions: [
+      {
+        title: "Astro vs Next.js para el frontend",
+        chosen: "Astro (modo estático)",
+        why: "El frontend es una demo interactiva sin routing complejo ni SSR. Astro genera HTML estático puro — cero JavaScript de framework en producción. Se sirve desde S3 + CloudFront sin servidor. Next.js añadiría complejidad innecesaria (server, bundle, hydration) para una SPA de una sola página.",
+        alternatives: [
+          "Next.js — necesario si se requiere SSR, autenticación server-side o rutas dinámicas",
+          "SvelteKit — output estático también, pero menos ecosistema",
+        ],
+      },
+      {
+        title: "sharp vs client-side resize",
+        chosen: "sharp en el backend (Node.js)",
+        why: "La compresión server-side garantiza que todos los archivos en S3 estén optimizados independientemente del cliente. El browser no tiene acceso a APIs de compresión tan eficientes. sharp usa binarios nativos de libvips — procesa imágenes de 10MB en <200ms.",
+        alternatives: [
+          "Canvas API en el browser — dependiente del dispositivo del usuario, calidad variable",
+          "Sin compresión — mayor costo de S3 storage y mayor latencia de descarga",
+        ],
+      },
+    ],
+    snippets: [
+      {
+        title: "Backend — Generación de Signed URL (Express 5 + AWS SDK v3)",
+        language: "javascript",
+        code: `import { getSignedUrl } from '@aws-sdk/cloudfront-signer';
+
+// CLOUDFRONT_PRIVATE_KEY viene de Secrets Manager en prod
+// o de variable de entorno en dev
+async function firmarUrl(url, expiresInSeconds = 86400) {
+  const signedUrl = await getSignedUrl({
+    url,
+    dateLessThan: new Date(Date.now() + expiresInSeconds * 1000),
+    privateKey: process.env.CLOUDFRONT_PRIVATE_KEY,
+    keyPairId: process.env.CLOUDFRONT_KEYPAIR_ID,
+  });
+  return signedUrl;
+}
+
+// Route handler
+router.get('/files/:key/signed-url', async (req, res) => {
+  const { key } = req.params;
+  const expires = parseInt(req.query.expires) || 86400;
+
+  const cfUrl = \`\${process.env.CLOUDFRONT_DOMAIN}/\${key}\`;
+  const signedUrl = await firmarUrl(cfUrl, expires);
+
+  res.json({
+    message: 'Signed URL generated',
+    data: { signedUrl, expiresIn: expires },
+  });
+});`,
+      },
+      {
+        title:
+          "Frontend — Fetch de Signed URL y copia al portapapeles (Vanilla JS)",
+        language: "javascript",
+        code: `async function generateSignedUrl(key, expiresSeconds) {
+  const res = await fetch(
+    \`\${API_URL}/files/\${encodeURIComponent(key)}/signed-url?expires=\${expiresSeconds}\`
+  );
+  const { data } = await res.json();
+
+  await navigator.clipboard.writeText(data.signedUrl);
+  showToast('URL copiada al portapapeles', 'success');
+}
+
+// Botones de expiración
+document.querySelectorAll('[data-expires]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.closest('[data-key]').dataset.key;
+    generateSignedUrl(key, btn.dataset.expires);
+  });
+});`,
+      },
+    ],
+  },
+
+  {
+    slug: "aws-event-driven-image-processing",
+    githubUrl:
+      "https://github.com/alfredo0607/aws-event-driven-image-processing-platform",
+    demoUrl: "https://services-resize-image.alfredo-dominguez.dev",
+    title: "AWS Event-Driven Image Processing Platform",
+    tagline:
+      "Plataforma fullstack de procesamiento de imágenes con pipeline event-driven. Sube una imagen y Lambda genera 3 variantes automáticamente vía S3 → SQS → Lambda → DynamoDB.",
+    status: "live",
+    architectureSlugs: [
+      "03-event-driven-serverless",
+      "01-private-cdn",
+      "04-container-backend",
+    ],
+    tags: [
+      "Astro",
+      "React 19",
+      "Node.js",
+      "Express",
+      "Lambda",
+      "SQS",
+      "S3",
+      "DynamoDB",
+      "CloudFront",
+      "Terraform",
+    ],
+    problem:
+      "Una plataforma necesita procesar imágenes subidas por usuarios (resize a múltiples resoluciones) sin bloquear el request del cliente. El usuario debe poder subir la imagen y ver los resultados en tiempo real a medida que Lambda los genera, sin recargar la página.",
+    solution:
+      "Frontend en Astro 6 + React 19 con polling automático post-upload. Backend Express 5 que sube imágenes al bucket S3 input, disparando el pipeline event-driven: S3 → SQS → Lambda (Python + Pillow) → 3 variantes en S3 output + metadata en DynamoDB. Las imágenes se sirven con Signed URLs de CloudFront. El frontend hace polling cada 4s hasta detectar las imágenes procesadas.",
+    diagram: `
+  Browser (Astro + React 19)
+     │
+     ├─ POST /api/v1/files/upload   → S3 input (dispara pipeline)
+     ├─ GET  /api/v1/files          → lista resized/ (polling cada 4s)
+     ├─ GET  /api/v1/files/signed-url → URL firmada CloudFront
+     └─ DELETE /api/v1/files        → elimina 3 variantes en paralelo
+          │
+          ▼
+  ┌──────────────────────────────────┐
+  │  Express 5 Backend               │
+  │  • Sube a image-resize/input/    │
+  │  • Lista image-resize/resized/   │
+  │  • Genera Signed URLs CloudFront │
+  └──────────────┬───────────────────┘
+                 │ S3 Event (ObjectCreated)
+                 ▼
+  ┌──────────────────────────────────────┐
+  │  SQS Queue → Lambda (Python + Pillow)│
+  │  → 800×600, 400×300, 150×150         │
+  │  → DynamoDB (metadata + status)      │
+  │  → SNS (notificación)                │
+  └──────────────────────────────────────┘
+                 │
+                 ▼ Signed URLs
+  CloudFront Distribution (OAC → S3)`,
+    steps: [
+      {
+        n: 1,
+        title: "Frontend — Upload con React 19 + polling automático",
+        detail:
+          "ImageUploader valida MIME type en cliente antes de enviar. Tras un upload exitoso, ImageProcessor activa isProcessing=true e incrementa refreshTrigger. ImageGallery detecta el cambio y comienza polling cada 4 segundos consultando GET /api/v1/files. Cuando el número de grupos de imágenes aumenta (las variantes están listas), el polling se detiene automáticamente.",
+      },
+      {
+        n: 2,
+        title: "Backend — Upload a S3 y disparo del pipeline",
+        detail:
+          "El backend sube la imagen al prefijo image-resize/input/ del bucket S3. Este upload dispara automáticamente la S3 Event Notification → SQS → Lambda. El backend responde al cliente con la URL firmada de la imagen original antes de que Lambda la procese.",
+      },
+      {
+        n: 3,
+        title: "Pipeline Lambda — 3 variantes + DynamoDB",
+        detail:
+          "Lambda (Python + Pillow) descarga la imagen de S3 input, genera 3 versiones (800×600, 400×300, 150×150) y las sube a S3 resized/. Implementa idempotencia via DynamoDB: si la imagen ya fue procesada, no la reprocesa. SQS con MaxReceiveCount=3 y DLQ para mensajes fallidos.",
+      },
+      {
+        n: 4,
+        title: "Frontend — Galería agrupada con preview y eliminación",
+        detail:
+          "ImageGallery agrupa las imágenes por filename extrayéndolo del S3 key (image-resize/resized/800x600/abc.jpg). Muestra las 3 variantes en una grid. Al eliminar un grupo, ejecuta DELETE en paralelo (Promise.all) para las 3 variantes. ImagePreviewModal muestra las dimensiones reales del archivo usando img.naturalWidth/naturalHeight.",
+      },
+    ],
+    techStack: [
+      {
+        category: "Frontend",
+        items: [
+          "Astro 6.x",
+          "React 19.2",
+          "Tailwind CSS 4.x",
+          "TypeScript 6.x",
+          "pnpm 11",
+        ],
+      },
+      {
+        category: "Backend",
+        items: [
+          "Node.js ≥ 20",
+          "Express 5.2.x",
+          "AWS SDK v3 (S3 + CloudFront)",
+          "@aws-sdk/cloudfront-signer",
+          "helmet",
+          "express-rate-limit",
+          "nanoid",
+        ],
+      },
+      {
+        category: "Pipeline AWS (Lambda)",
+        items: [
+          "Python 3.12",
+          "Pillow (imagen resize)",
+          "boto3",
+          "SQS + DLQ",
+          "DynamoDB (metadata)",
+          "SNS (notificaciones)",
+        ],
+      },
+      {
+        category: "Infraestructura",
+        items: [
+          "S3 (input + output)",
+          "CloudFront + Signed URLs",
+          "KMS (SSE-KMS)",
+          "Lambda Layers (Pillow)",
+          "Terraform",
+        ],
+      },
+    ],
+    decisions: [
+      {
+        title: "Polling vs WebSockets para actualizar la galería",
+        chosen: "Polling con intervalo adaptativo (4s)",
+        why: "WebSockets requieren un servidor stateful adicional (ECS task o API Gateway WebSockets). Polling cada 4s es suficiente para una demo — Lambda procesa imágenes en 2-5 segundos. El polling se detiene automáticamente al detectar las imágenes nuevas, minimizando requests innecesarios.",
+        alternatives: [
+          "WebSockets — tiempo real verdadero, requiere servidor adicional y más complejidad",
+          "Server-Sent Events — unidireccional, pero requiere conexión HTTP persistente al backend",
+          "AppSync Subscriptions — managed WebSockets, más costo y configuración",
+        ],
+      },
+      {
+        title: "Astro Islands con React vs SPA pura",
+        chosen: "Astro Islands (React como isla interactiva)",
+        why: "La página tiene contenido estático (explicación de la arquitectura) que no necesita JavaScript. Solo la sección de demo (upload + galería) es interactiva. Astro Islands permite hidratación selectiva: solo los componentes React que necesitan interactividad se envían al cliente.",
+        alternatives: [
+          "Next.js SPA — hidrata toda la página, más JS en el bundle",
+          "Remix — server-side forms, más complejo para esta demo",
+        ],
+      },
+    ],
+    snippets: [
+      {
+        title: "Frontend — Hook de polling en ImageGallery (React 19)",
+        language: "typescript",
+        code: `// Polling automático cuando isProcessing = true
+// Se detiene cuando detecta nuevas imágenes o tras 30s de timeout
+useEffect(() => {
+  if (!isProcessing) return;
+
+  let attempts = 0;
+  const MAX_ATTEMPTS = 30000 / 4000; // 30s / 4s = 7 intentos
+
+  const interval = setInterval(async () => {
+    attempts++;
+    const result = await listImages();
+    if (!result.success) return;
+
+    const newGroups = groupByFilename(result.data.files);
+    if (newGroups.length > prevGroupCount) {
+      setGroups(newGroups);
+      onProcessingComplete();
+      clearInterval(interval);
+    }
+
+    if (attempts >= MAX_ATTEMPTS) {
+      onProcessingComplete();
+      clearInterval(interval);
+    }
+  }, 4000);
+
+  return () => clearInterval(interval);
+}, [isProcessing, prevGroupCount]);`,
+      },
+      {
+        title: "Frontend — Eliminación en paralelo de 3 variantes",
+        language: "typescript",
+        code: `async function handleDeleteGroup(group: ImageGroup) {
+  const keys = [
+    group.variants['800x600']?.key,
+    group.variants['400x300']?.key,
+    group.variants['150x150']?.key,
+  ].filter(Boolean) as string[];
+
+  // Elimina las 3 variantes en paralelo
+  const results = await Promise.all(keys.map(key => deleteImage(key)));
+
+  const allOk = results.every(r => r.success);
+  if (allOk) {
+    setGroups(prev => prev.filter(g => g.filename !== group.filename));
+  }
+}`,
+      },
+    ],
+  },
+
+  {
+    slug: "gps-vehicle-tracking",
+    githubUrl: "https://github.com/alfredo0607/gps-vehicle-tracking-system",
+    demoUrl: "https://tracking-vehicle-aws.alfredo-dominguez.dev",
+    title: "GPS Vehicle Tracking System",
+    tagline:
+      "Sistema fullstack de rastreo de flota en tiempo real con mapas interactivos, comandos remotos vía AWS IoT y almacenamiento en DynamoDB.",
+    status: "live",
+    architectureSlugs: ["05-gps-vehicle-tracking", "04-container-backend"],
+    tags: [
+      "React",
+      "MapLibre GL",
+      "Node.js",
+      "Express",
+      "AWS IoT",
+      "DynamoDB",
+      "JWT",
+      "Terraform",
+    ],
+    problem:
+      "Una empresa de logística necesita monitorear su flota de vehículos en tiempo real: ver la posición actual en un mapa, consultar el historial de coordenadas, y enviar comandos remotos (bloquear motor, activar alarma) directamente al dispositivo GPS instalado en el vehículo.",
+    solution:
+      "Dashboard React + MapLibre GL que muestra posiciones en tiempo real. Backend Node.js + Express que gestiona autenticación JWT, CRUD de vehículos y dispositivos GPS en DynamoDB, y envío de comandos remotos via AWS IoT (MQTT). Los dispositivos GPS publican coordenadas al IoT endpoint; el backend las persiste en DynamoDB con TTL.",
+    diagram: `
+  ┌────────────────────────────────────────────────────────────────┐
+  │  Dashboard React (Vite + MapLibre GL + TailwindCSS)            │
+  │  • Mapa interactivo con posición de vehículos                  │
+  │  • CommandPanel: bloquear motor, alarma, flash de luces         │
+  │  • Historial de coordenadas por vehículo                       │
+  └──────────────────────────────┬─────────────────────────────────┘
+                                 │ JWT Auth + REST
+                                 ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Backend (Node.js + Express 4)                               │
+  │  • Auth: bcryptjs + jsonwebtoken                             │
+  │  • Rutas: /auth, /gps, /vehicles, /commands                  │
+  │  • AWS IoT: publica comandos MQTT al dispositivo             │
+  └────────────────────┬──────────────────────┬──────────────────┘
+                       │                      │
+                       ▼                      ▼
+  ┌─────────────────────────┐    ┌─────────────────────────────┐
+  │  DynamoDB               │    │  AWS IoT Core               │
+  │  • Usuarios             │    │  MQTT endpoint              │
+  │  • GPS (dispositivos)   │    │  Comandos → dispositivo     │
+  │  • Vehículos            │    │  (block_engine, alarm, etc) │
+  │  • Coordenadas (TTL)    │    └─────────────────────────────┘
+  │  • Comandos             │                 │
+  │  • Eventos (TTL)        │                 ▼ MQTT
+  └─────────────────────────┘    ┌─────────────────────────────┐
+                                 │  Dispositivo GPS (hardware)  │
+                                 │  Publica coordenadas         │
+                                 │  Recibe comandos MQTT        │
+                                 └─────────────────────────────┘`,
+    steps: [
+      {
+        n: 1,
+        title: "Frontend — Mapa interactivo con MapLibre GL",
+        detail:
+          "El dashboard usa MapLibre GL (open-source, sin costo de API key) para renderizar mapas. Los vehículos se muestran como marcadores con su posición actual. El componente Map.jsx actualiza las posiciones consultando GET /api/gps periódicamente. React Router gestiona las páginas: Dashboard, Login, detalle de vehículo.",
+      },
+      {
+        n: 2,
+        title: "Backend — Autenticación JWT + RBAC",
+        detail:
+          "El backend usa bcryptjs para hashear contraseñas y jsonwebtoken para emitir tokens JWT. El middleware auth.middleware.js verifica el token en cada request protegido. Los usuarios se almacenan en DynamoDB (tabla Usuarios) con un GSI en email para búsqueda eficiente.",
+      },
+      {
+        n: 3,
+        title: "Envío de comandos remotos vía AWS IoT",
+        detail:
+          "El servicio iot-commands.service.js publica mensajes MQTT al IoT endpoint de AWS usando el AWS SDK. Cada comando tiene un payload específico (ej: block_engine → {CMD: 'setdigout 100'}). El estado del comando (pending → sent → executed/failed/timeout) se persiste en DynamoDB (tabla Comandos).",
+      },
+      {
+        n: 4,
+        title: "Persistencia de coordenadas con TTL en DynamoDB",
+        detail:
+          "Las coordenadas GPS se almacenan en DynamoDB con TTL habilitado — expiran automáticamente después del período configurado, controlando el costo de storage. Un GSI en gpsId + timestamp permite consultar el historial de posiciones de un dispositivo ordenado cronológicamente.",
+      },
+    ],
+    techStack: [
+      {
+        category: "Frontend",
+        items: [
+          "React 18.3.1",
+          "Vite 5.4.2",
+          "React Router 6.26.2",
+          "MapLibre GL 4.7.1",
+          "TailwindCSS 3.4.1",
+          "Axios 1.7.7",
+          "Lucide React",
+        ],
+      },
+      {
+        category: "Backend",
+        items: [
+          "Node.js 18.x",
+          "Express 4.19.2",
+          "jsonwebtoken 9.0.2",
+          "bcryptjs 2.4.3",
+          "AWS SDK 2.x",
+          "uuid 10.0.0",
+          "dotenv 16.x",
+        ],
+      },
+      {
+        category: "Infraestructura AWS",
+        items: [
+          "AWS IoT Core (MQTT)",
+          "DynamoDB (6 tablas + TTL)",
+          "DynamoDB GSI (email, deviceId, gpsId-timestamp)",
+          "IAM Roles",
+          "Terraform",
+        ],
+      },
+    ],
+    decisions: [
+      {
+        title: "MapLibre GL vs Google Maps vs Leaflet",
+        chosen: "MapLibre GL",
+        why: "MapLibre GL es open-source y no requiere API key ni cargos por uso. Soporta mapas vectoriales con WebGL — mejor performance que Leaflet (raster tiles). Leaflet es más simple pero limitado para mapas con muchos marcadores en tiempo real. Google Maps tiene mejor UX pero cobra por request.",
+        alternatives: [
+          "Google Maps — mejor UX y cobertura, costo por uso ($7/1000 requests)",
+          "Leaflet — open-source, simple, raster tiles, menos performance con muchos marcadores",
+          "Mapbox GL — similar a MapLibre (es el fork), requiere API key y tiene costos",
+        ],
+      },
+      {
+        title: "DynamoDB vs RDS para persistir coordenadas GPS",
+        chosen: "DynamoDB con TTL",
+        why: "Las coordenadas GPS son writes frecuentes (cada 30s por vehículo) con lecturas por rango de tiempo. DynamoDB On-Demand escala automáticamente sin capacity planning. El TTL elimina coordenadas antiguas automáticamente sin queries de limpieza. Para 100 vehículos → 2,880 writes/hora → DynamoDB maneja esto sin configuración.",
+        alternatives: [
+          "RDS PostgreSQL con PostGIS — queries geoespaciales avanzadas, requiere gestionar instancias",
+          "TimescaleDB — optimizado para series de tiempo, más complejo de operar",
+        ],
+      },
+    ],
+    snippets: [
+      {
+        title: "Backend — Envío de comando MQTT via AWS IoT",
+        language: "javascript",
+        code: `import AWS from 'aws-sdk';
+
+const iotData = new AWS.IotData({
+  endpoint: process.env.IOT_ENDPOINT,
+  region: process.env.AWS_REGION,
+});
+
+const COMMAND_PAYLOADS = {
+  block_engine:     { CMD: 'setdigout 100' },
+  unblock_engine:   { CMD: 'setdigout 000' },
+  activate_alarm:   { CMD: 'setdigout 010' },
+  deactivate_alarm: { CMD: 'setdigout 000' },
+  flash_lights:     { CMD: 'setdigout 001' },
+  request_status:   { CMD: 'getinfo' },
+};
+
+export async function sendIoTCommand(deviceId, command, parameters = {}) {
+  const payload = COMMAND_PAYLOADS[command] ?? { CMD: command, ...parameters };
+
+  await iotData.publish({
+    topic: \`gps/\${deviceId}/commands\`,
+    qos: 1,
+    payload: JSON.stringify(payload),
+  }).promise();
+}`,
+      },
+      {
+        title: "Frontend — Cliente Axios con interceptor JWT",
+        language: "javascript",
+        code: `import axios from 'axios';
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+// Adjunta el JWT automáticamente a cada request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) config.headers.Authorization = \`Bearer \${token}\`;
+  return config;
+});
+
+export const sendCommand = async (gpsId, command, parameters = {}) => {
+  const { data } = await api.post(\`/commands/\${gpsId}/send\`, {
+    command,
+    parameters,
+  });
+  return data;
+};
+
+export const getCommandHistory = async (gpsId, limit = 50) => {
+  const { data } = await api.get(\`/commands/\${gpsId}/history\`, {
+    params: { limit },
+  });
+  return data;
+};`,
+      },
+    ],
+  },
+
+  // ── Proyectos placeholder ───────────────────────────────────────────────────
   {
     slug: "api-rest-jwt",
     githubUrl: "https://github.com/Alfredo0607/api-rest-jwt",
     demoUrl: "https://www.google.com",
     title: "API REST con Autenticación JWT",
     tagline:
-      "API Node.js + TypeScript + Express con JWT, RBAC, rate limiting, OpenAPI docs y deploy en ECS Fargate.",
-    status: "building",
+      "API Node.js + TypeScript + Express con JWT, RBAC, rate limiting, OpenAPI docs y deploy en EC2 + Docker.",
+    status: "In development",
     tags: [
       "Node.js",
       "TypeScript",
       "Express",
       "JWT",
       "PostgreSQL",
-      "ECS Fargate",
+      "EC2",
       "Docker",
     ],
     problem:
       "Construir una API REST production-ready con autenticación stateless (JWT), control de acceso basado en roles (RBAC), protección contra abuso (rate limiting), validación exhaustiva de inputs, y documentación automática. El deploy debe ser reproducible con Docker y la infraestructura gestionada con Terraform.",
     solution:
-      "API construida con Express + TypeScript usando una arquitectura en capas (routes → middleware → controllers → services → repositories). JWT para autenticación stateless con refresh token rotation. RBAC con roles definidos en base de datos. Rate limiting por IP y por usuario con Redis. Validación con Zod en cada endpoint. Documentación OpenAPI generada automáticamente. Containerizada con Docker multi-stage y desplegada en ECS Fargate.",
+      "API construida con Express + TypeScript usando una arquitectura en capas (routes → middleware → controllers → services → repositories). JWT para autenticación stateless con refresh token rotation. RBAC con roles definidos en base de datos. Rate limiting por IP y por usuario con Redis. Validación con Zod en cada endpoint. Documentación OpenAPI generada automáticamente. Containerizada con Docker multi-stage y desplegada en EC2 + Docker.",
     diagram: `
   Cliente (React / React Native / Postman)
      │ HTTPS
@@ -130,7 +720,7 @@ export const projects: Project[] = [
         category: "Infraestructura",
         items: [
           "Docker (multi-stage)",
-          "ECS Fargate",
+          "EC2 + Docker",
           "Terraform",
           "GitHub Actions",
         ],
@@ -275,7 +865,7 @@ router.post(
     title: "Dashboard en Tiempo Real con React",
     tagline:
       "Dashboard interactivo Next.js con WebSockets para métricas en vivo desde CloudWatch y DynamoDB Streams.",
-    status: "building",
+    status: "In development",
     tags: [
       "Next.js",
       "React",
@@ -373,7 +963,7 @@ router.post(
       },
       {
         category: "Infraestructura",
-        items: ["ECS Fargate (WS server)", "Next.js en Vercel", "IAM Roles"],
+        items: ["EC2 + Docker (WS server)", "Next.js en Vercel", "IAM Roles"],
       },
     ],
     decisions: [
@@ -537,7 +1127,7 @@ pollCloudWatch(); // ejecuta inmediatamente al arrancar`,
     title: "App Móvil con React Native + AWS Cognito",
     tagline:
       "Aplicación móvil multiplataforma iOS/Android con autenticación Cognito, API serverless y sincronización offline.",
-    status: "planned",
+    status: "In development",
     tags: [
       "React Native",
       "Expo",
@@ -730,7 +1320,7 @@ export function useAuth() {
     title: "Pipeline de Datos Serverless",
     tagline:
       "Ingesta y procesamiento de datos en tiempo real con Kinesis + Lambda + S3 + Glue + Athena. 100% Terraform.",
-    status: "planned",
+    status: "In development",
     tags: [
       "Kinesis",
       "Lambda",

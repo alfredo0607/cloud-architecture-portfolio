@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { projects, getProject } from "@/lib/data/projects";
+import { architectures } from "@/lib/data/architectures";
 
 export function generateStaticParams() {
   return projects.map((p) => ({ slug: p.slug }));
@@ -34,6 +35,10 @@ const statusConfig = {
     label: "Planned",
     className: "bg-surface text-muted border border-border-subtle",
   },
+  "In development": {
+    label: "In Development",
+    className: "bg-blue-900/40 text-blue-400 border border-blue-800",
+  },
 };
 
 export default async function ProjectDetailPage({
@@ -46,6 +51,10 @@ export default async function ProjectDetailPage({
   if (!project) notFound();
 
   const status = statusConfig[project.status];
+
+  const usedArchitectures = (project.architectureSlugs ?? [])
+    .map((s) => architectures.find((a) => a.slug === s))
+    .filter((a): a is NonNullable<typeof a> => a !== undefined);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -129,6 +138,28 @@ export default async function ProjectDetailPage({
               </span>
             ))}
           </div>
+
+          {/* Arquitecturas usadas */}
+          {usedArchitectures.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-border-subtle">
+              <p className="text-xs font-mono text-muted uppercase tracking-widest mb-3">
+                Arquitecturas AWS utilizadas
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {usedArchitectures.map((arch) => (
+                  <Link
+                    key={arch.slug}
+                    href={`/arquitecturas/${arch.slug}`}
+                    className="inline-flex items-center gap-2 bg-surface border border-aws/30 text-aws px-4 py-2 rounded-lg text-sm font-mono hover:bg-aws/5 hover:border-aws/60 transition-colors"
+                  >
+                    <span className="text-aws/60">{arch.number}</span>
+                    {arch.title}
+                    <span className="text-aws/50 text-xs">→</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Problema & Solución */}
@@ -219,9 +250,11 @@ export default async function ProjectDetailPage({
                 <h3 className="font-semibold text-foreground mb-4">
                   {d.title}
                 </h3>
+
+
                 <div className="grid md:grid-cols-2 gap-4 mb-4">
                   <div className="bg-foreground/5 border border-border-subtle rounded-lg p-4">
-                    <p className="text-xs font-mono text-muted uppercase tracking-widest mb-2">
+                    <p className="text-xs font-mono text-aws uppercase tracking-widest mb-2">
                       Elegido
                     </p>
                     <p className="text-foreground text-sm font-medium">
@@ -242,6 +275,8 @@ export default async function ProjectDetailPage({
                     </ul>
                   </div>
                 </div>
+
+                
                 <div className="border-t border-border-subtle pt-4">
                   <p className="text-xs font-mono text-muted uppercase tracking-widest mb-2">
                     Razón

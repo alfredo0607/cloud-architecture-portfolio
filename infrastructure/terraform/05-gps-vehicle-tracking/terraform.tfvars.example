@@ -1,0 +1,12 @@
+aws_region   = "us-east-1"
+environment  = "prod"
+project_name = "fleet-tracker"
+
+# Email that receives ignition alerts (encendido/apagado del vehículo)
+alert_email = "tu-email@example.com"
+
+# SMS alerts — leave empty ("") to skip SMS subscription
+alert_phone = "+573001234567"
+
+# IMEI of the Teltonika FMC920 — leave empty ("") to skip Thing creation
+iot_device_imei = "863238073517528"
