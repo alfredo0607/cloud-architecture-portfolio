@@ -11,7 +11,7 @@ export const architectures: Architecture[] = [
     title: "CDN Privada Segura",
     tagline:
       "Entrega global de archivos privados con CloudFront + S3 + Signed URLs y Origin Access Control.",
-    status: "building",
+    status: "live",
     tags: ["CloudFront", "S3", "OAC", "Signed URLs", "IAM", "KMS", "Terraform"],
     problem:
       "Una plataforma SaaS necesita entregar archivos sensibles (PDFs, videos, contratos) a usuarios autenticados de forma global, con baja latencia, sin exponer el bucket S3 directamente a Internet ni permitir el acceso a URLs permanentes que puedan filtrarse.",
@@ -462,7 +462,7 @@ export default firmarUrl;
     title: "Backend Escalable con Contenedores",
     tagline:
       "API containerizada con ECS Fargate + ALB + Auto Scaling que responde a picos de tráfico sin intervención manual.",
-    status: "building",
+    status: "live",
     tags: [
       "ECS Fargate",
       "ALB",
@@ -1433,7 +1433,7 @@ output "cloudwatch_dashboard_url" {
     title: "Arquitectura Event-Driven Serverless",
     tagline:
       "Pipeline de procesamiento de imágenes desacoplado con S3 + SQS + Lambda + DynamoDB con resiliencia end-to-end.",
-    status: "building",
+    status: "live",
     tags: [
       "Lambda",
       "SQS",
@@ -2517,7 +2517,7 @@ output "env_vars_for_backend" {
     title: "Backend Containerizado en EC2",
     tagline:
       "APIs Node.js en Docker sobre EC2 Graviton2 con Nginx como reverse proxy, HTTPS automático vía Let's Encrypt y despliegues sin downtime.",
-    status: "building",
+    status: "live",
     tags: [
       "EC2",
       "Docker",
@@ -3003,7 +3003,7 @@ curl https://api.alfredo-dominguez.dev/health
       },
     ],
   },
-  
+
   {
     slug: "05-gps-vehicle-tracking",
     githubUrl:
@@ -3015,7 +3015,7 @@ curl https://api.alfredo-dominguez.dev/health
       "/architectures/05-gps-vehicle-tracking/infrastructure-gps-vehicle-tracking.png",
     tagline:
       "Teltonika FMC920 → IoT Core → Lambda → DynamoDB + Location Service + SNS",
-    status: "building",
+    status: "live",
     tags: [
       "IoT Core",
       "Lambda",
