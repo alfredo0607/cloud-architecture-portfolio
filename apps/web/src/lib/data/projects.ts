@@ -593,12 +593,12 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
   // ── Proyectos placeholder ───────────────────────────────────────────────────
   {
     slug: "api-rest-jwt",
-    githubUrl: "https://github.com/Alfredo0607/api-rest-jwt",
-    demoUrl: "https://www.google.com",
+    githubUrl: "https://github.com/alfredo0607/express-typescript-jwt-api",
+    demoUrl: "https://express-typescript-jwt-api.pages.dev/login",
     title: "API REST con Autenticación JWT",
     tagline:
       "API Node.js + TypeScript + Express con JWT, RBAC, rate limiting, OpenAPI docs y deploy en EC2 + Docker.",
-    status: "In development",
+    status: "live",
     tags: [
       "Node.js",
       "TypeScript",
@@ -607,13 +607,14 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
       "PostgreSQL",
       "EC2",
       "Docker",
+      "Redis",
     ],
     problem:
       "Construir una API REST production-ready con autenticación stateless (JWT), control de acceso basado en roles (RBAC), protección contra abuso (rate limiting), validación exhaustiva de inputs, y documentación automática. El deploy debe ser reproducible con Docker y la infraestructura gestionada con Terraform.",
     solution:
       "API construida con Express + TypeScript usando una arquitectura en capas (routes → middleware → controllers → services → repositories). JWT para autenticación stateless con refresh token rotation. RBAC con roles definidos en base de datos. Rate limiting por IP y por usuario con Redis. Validación con Zod en cada endpoint. Documentación OpenAPI generada automáticamente. Containerizada con Docker multi-stage y desplegada en EC2 + Docker.",
     diagram: `
-  Cliente (React / React Native / Postman)
+  Cliente (Next.js / Postman)
      │ HTTPS
      ▼
   ┌──────────────────────────────────────────────────────┐
@@ -692,7 +693,7 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
     techStack: [
       {
         category: "Runtime & Framework",
-        items: ["Node.js 20 LTS", "Express 4", "TypeScript 5"],
+        items: ["Node.js 24.16.0 LTS", "Express 4", "TypeScript 5"],
       },
       {
         category: "Autenticación & Seguridad",
@@ -752,54 +753,49 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
         language: "typescript",
         code: `import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import fs from "fs";
+import { getPublicKey } from "../config/jwt";
+import { AppError } from "../utils/AppError";
+import type { JwtPayload, AuthUser } from "../types";
 
-const PUBLIC_KEY = fs.readFileSync("./keys/public.pem", "utf-8");
-
-export interface AuthRequest extends Request {
-  user?: { id: string; email: string; role: string };
-}
-
-// Verifica el JWT y adjunta el payload a req.user
 export function authenticate(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
+  req: Request,
+  _res: Response,
+  next: NextFunction,
 ): void {
-  const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Token de autenticación requerido" });
-    return;
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    throw AppError.unauthorized("Missing or invalid Authorization header");
   }
 
-  const token = header.slice(7);
+  const token = authHeader.slice(7);
+
   try {
-    req.user = jwt.verify(token, PUBLIC_KEY, { algorithms: ["RS256"] }) as AuthRequest["user"];
+    const payload = jwt.verify(token, getPublicKey(), {
+      algorithms: ["RS256"],
+    }) as JwtPayload;
+
+    req.user = { id: payload.sub, roles: payload.roles } satisfies AuthUser;
+
     next();
-  } catch (err) {
-    if (err instanceof jwt.TokenExpiredError) {
-      res.status(401).json({ error: "Token expirado", code: "TOKEN_EXPIRED" });
-    } else {
-      res.status(401).json({ error: "Token inválido" });
-    }
+  } catch {
+    throw AppError.unauthorized("Invalid or expired token");
   }
 }
 
-// Verifica que el rol del usuario esté en la lista permitida
-export function authorize(...roles: string[]) {
-  return (req: AuthRequest, res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      res.status(401).json({ error: "No autenticado" });
-      return;
-    }
-    if (!roles.includes(req.user.role)) {
-      res.status(403).json({
-        error: "Permisos insuficientes",
-        required: roles,
-        current: req.user.role,
-      });
-      return;
-    }
+
+import { Request, Response, NextFunction } from "express";
+import { AppError } from "../utils/AppError";
+import type { UserRole } from "../types";
+
+export function authorize(...roles: UserRole[]) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) throw AppError.unauthorized();
+
+    const hasRole = req.user.roles.some((r) => roles.includes(r));
+
+    if (!hasRole) throw AppError.forbidden();
+
     next();
   };
 }`,
@@ -808,51 +804,154 @@ export function authorize(...roles: string[]) {
         title: "TypeScript — Validación con Zod + middleware genérico",
         language: "typescript",
         code: `import { Request, Response, NextFunction } from "express";
-import { ZodSchema, ZodError } from "zod";
+import { ZodSchema } from "zod";
 
-// Middleware genérico que valida body, params o query contra un schema Zod
-export function validate<T>(
-  schema: ZodSchema<T>,
-  target: "body" | "params" | "query" = "body"
-) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const result = schema.safeParse(req[target]);
-    if (!result.success) {
-      const errors = (result.error as ZodError).errors.map((e) => ({
-        field: e.path.join("."),
-        message: e.message,
-      }));
-      res.status(400).json({ error: "Validación fallida", details: errors });
-      return;
-    }
-    req[target] = result.data;
+interface RequestSchemas {
+  body?: ZodSchema;
+  params?: ZodSchema;
+  query?: ZodSchema;
+}
+
+export function validate(schemas: RequestSchemas) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (schemas.body) req.body = schemas.body.parse(req.body);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+    if (schemas.params) req.params = schemas.params.parse(req.params) as any;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+    if (schemas.query) req.query = schemas.query.parse(req.query) as any;
     next();
   };
 }
 
+
 // --- Uso en routes ---
-import { z } from "zod";
-import { Router } from "express";
+import { Router, IRouter } from "express";
+import {
+  createUser,
+  getProfile,
+  listUsers,
+  updateUser,
+  deleteUser,
+} from "../controllers/users.controller";
+import { authenticate } from "../middleware/authenticate";
+import { authorize } from "../middleware/authorize";
+import { validate } from "../middleware/validate";
+import {
+  adminUpdateUserSchema,
+  createUserByAdminSchema,
+  userIdParamSchema,
+} from "../models/users.schemas";
 
-const CreateUserSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8).max(72),
-  role: z.enum(["user", "admin"]).default("user"),
-});
+export const router: IRouter = Router();
 
-const router = Router();
+router.use(authenticate);
 
+/**
+ * @openapi
+ * /api/users/me:
+ *   get:
+ *     tags: [Users]
+ *     summary: Get current user profile
+ *     responses:
+ *       200:
+ *         description: User profile
+ *       401:
+ *         description: Unauthorized
+ */
+router.get("/me", getProfile);
+
+/**
+ * @openapi
+ * /api/users:
+ *   get:
+ *     tags: [Users]
+ *     summary: List all users (admin only)
+ *     responses:
+ *       200:
+ *         description: List of users
+ *       403:
+ *         description: Forbidden
+ */
+router.get("/", authorize("admin"), listUsers);
+
+/**
+ * @openapi
+ * /api/users:
+ *   post:
+ *     tags: [Users]
+ *     summary: Create a new user (admin only)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, email, password]
+ *             properties:
+ *               name: { type: string }
+ *               email: { type: string, format: email }
+ *               password: { type: string }
+ *               role: { type: string, enum: [admin, user, viewer] }
+ *     responses:
+ *       201:
+ *         description: User created
+ *       409:
+ *         description: Email already in use
+ */
 router.post(
-  "/users",
-  authenticate,
+  "/",
   authorize("admin"),
-  validate(CreateUserSchema),
-  async (req, res) => {
-    // req.body está tipado y validado
-    const { email, password, role } = req.body;
-    // ...
-    res.status(201).json({ message: "Usuario creado" });
-  }
+  validate({ body: createUserByAdminSchema }),
+  createUser,
+);
+
+/**
+ * @openapi
+ * /api/users/{id}:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Update user (admin or own profile)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: User updated
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: User not found
+ */
+router.patch(
+  "/:id",
+  validate({ params: userIdParamSchema, body: adminUpdateUserSchema }),
+  updateUser,
+);
+
+/**
+ * @openapi
+ * /api/users/{id}:
+ *   delete:
+ *     tags: [Users]
+ *     summary: Delete user (admin only)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       204:
+ *         description: User deleted
+ *       403:
+ *         description: Forbidden
+ */
+router.delete(
+  "/:id",
+  authorize("admin"),
+  validate({ params: userIdParamSchema }),
+  deleteUser,
 );`,
       },
     ],
@@ -952,7 +1051,7 @@ router.post(
       },
       {
         category: "WebSocket Server",
-        items: ["Node.js 20", "ws (WebSocket library)", "TypeScript"],
+        items: ["Node.js 24.16.0", "ws (WebSocket library)", "TypeScript"],
       },
       {
         category: "AWS SDKs",
