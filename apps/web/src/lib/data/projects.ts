@@ -599,6 +599,7 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
     tagline:
       "API Node.js + TypeScript + Express con JWT, RBAC, rate limiting, OpenAPI docs y deploy en EC2 + Docker.",
     status: "live",
+    architectureSlugs: ["04-container-backend"],
     tags: [
       "Node.js",
       "TypeScript",
