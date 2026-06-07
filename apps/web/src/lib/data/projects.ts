@@ -693,8 +693,23 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
     ],
     techStack: [
       {
+        category: "Frontend",
+        items: [
+          "Next.js 16 (App Router)",
+          "React 19, shadcn/ui, Radix UI",
+          "TypeScript 5",
+          "Tailwind CSS",
+          "Zustand v5",
+          "TanStack Query v5",
+          "Axios",
+          "react-hook-form + Zod v3",
+          "Sonner",
+        ],
+      },
+
+      {
         category: "Runtime & Framework",
-        items: ["Node.js 24.16.0 LTS", "Express 4", "TypeScript 5"],
+        items: ["Node.js 24.16.0 LTS", "Express 5", "TypeScript 6"],
       },
       {
         category: "Autenticación & Seguridad",
@@ -712,7 +727,7 @@ export const getCommandHistory = async (gpsId, limit = 50) => {
       },
       {
         category: "Base de datos",
-        items: ["PostgreSQL 16", "node-postgres (pg)", "pg-pool"],
+        items: ["PostgreSQL 17", "node-postgres (pg)", "pg-pool"],
       },
       {
         category: "Caché & Sessions",
@@ -1063,7 +1078,7 @@ router.delete(
       },
       {
         category: "Infraestructura",
-        items: ["EC2 + Docker (WS server)", "Next.js en Vercel", "IAM Roles"],
+        items: ["EC2 + Docker (WS server)", "IAM Roles"],
       },
     ],
     decisions: [
