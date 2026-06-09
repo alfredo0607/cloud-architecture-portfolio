@@ -975,12 +975,13 @@ router.delete(
 
   {
     slug: "dashboard-tiempo-real",
-    githubUrl: "https://github.com/Alfredo0607/dashboard-tiempo-real",
-    demoUrl: "https://www.google.com",
+    githubUrl: "https://github.com/alfredo0607/real-time-dashboard",
+    demoUrl: "https://monitor-dashboard.alfredo-dominguez.dev",
     title: "Dashboard en Tiempo Real con React",
     tagline:
       "Dashboard interactivo Next.js con WebSockets para métricas en vivo desde CloudWatch y DynamoDB Streams.",
-    status: "In development",
+    status: "live",
+    architectureSlugs: ["04-container-backend"],
     tags: [
       "Next.js",
       "React",
@@ -991,7 +992,7 @@ router.delete(
       "DynamoDB Streams",
     ],
     problem:
-      "Un equipo de operaciones necesita monitorear métricas de su plataforma AWS en tiempo real (CPU, requests/s, errores, latencia p95) sin refrescar la página. Los datos vienen de CloudWatch y DynamoDB. La solución debe actualizar el dashboard automáticamente cada vez que hay nuevos datos.",
+      "Un equipo de operaciones necesita monitorear métricas de su plataforma AWS en tiempo real (CPU, Network In, Network Out, Disk Read, Disk Write) sin refrescar la página. Los datos vienen de CloudWatch y DynamoDB. La solución debe actualizar el dashboard automáticamente cada vez que hay nuevos datos.",
     solution:
       "Frontend Next.js con componentes de gráficos en tiempo real. WebSocket server (Node.js) que actúa como proxy entre el browser y las APIs de AWS: consulta CloudWatch Metrics cada 60 segundos y escucha DynamoDB Streams en tiempo real. El cliente usa un hook personalizado useMetricsStream que gestiona la conexión WebSocket, reconexión automática y el buffer de datos.",
     diagram: `
@@ -1020,8 +1021,7 @@ router.delete(
   ┌─────────────┐          ┌─────────────────┐
   │  CloudWatch │          │  DynamoDB       │
   │  Metrics    │          │  Streams        │
-  │  (CPU, req, │          │  (nuevos items) │
-  │   latencia) │          └─────────────────┘
+  │  (CPU, )    │          └─────────────────┘
   └─────────────┘
 
   Frontend State Machine (useMetricsStream):
