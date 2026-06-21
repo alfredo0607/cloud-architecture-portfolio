@@ -4,10 +4,21 @@ type Cert = {
   provider: "aws" | "azure" | "hashicorp";
   level: string;
   status: "obtained" | "studying" | "planned";
+  badge?: string;
+  credentialUrl?: string;
 };
 
 const certifications: Cert[] = [
   // AWS
+  {
+    code: "AWS Cloud Quest",
+    name: "AWS Cloud Quest: Cloud Practitioner",
+    provider: "aws",
+    level: "Foundational",
+    status: "obtained",
+    badge: "/certificate/aws-cloud-quest-cloud-practitioner-training-badge.png",
+    credentialUrl: "/certificate/aws_cloud_quest_cloud.pdf",
+  },
   {
     code: "CLF-C02",
     name: "AWS Cloud Practitioner",
@@ -138,9 +149,18 @@ export function Certifications() {
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {certs.map((cert) => {
                     const status = statusConfig[cert.status];
+                    const CardTag = cert.credentialUrl ? "a" : "div";
+                    const cardProps = cert.credentialUrl
+                      ? {
+                          href: cert.credentialUrl,
+                          target: "_blank",
+                          rel: "noopener noreferrer",
+                        }
+                      : {};
                     return (
-                      <div
+                      <CardTag
                         key={cert.code}
+                        {...cardProps}
                         className="bg-surface border border-border-subtle rounded-xl p-5 flex flex-col gap-3 hover:border-foreground/20 transition-colors"
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -153,6 +173,17 @@ export function Certifications() {
                             {status.label}
                           </span>
                         </div>
+
+                        {cert.badge && (
+                          <div className="flex justify-center py-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={cert.badge}
+                              alt={`Insignia ${cert.name}`}
+                              className="h-24 w-24 object-contain"
+                            />
+                          </div>
+                        )}
 
                         <div>
                           <p className="text-foreground font-semibold text-sm leading-snug">
@@ -187,7 +218,7 @@ export function Certifications() {
                             },
                           )}
                         </div>
-                      </div>
+                      </CardTag>
                     );
                   })}
                 </div>
