@@ -11,13 +11,26 @@ type Cert = {
 const certifications: Cert[] = [
   // AWS
   {
+    code: "AIF-C01",
+    name: "AWS Certified AI Practitioner",
+    provider: "aws",
+    level: "Foundational",
+    status: "obtained",
+    badge:
+      "/certificate/aws-certified-ai-practitioner/aws-certified-ai-practitioner.png",
+    credentialUrl:
+      "/certificate/aws-certified-ai-practitioner/aws-certified-ai-practitioner.pdf",
+  },
+  {
     code: "AWS Cloud Quest",
     name: "AWS Cloud Quest: Cloud Practitioner",
     provider: "aws",
     level: "Foundational",
     status: "obtained",
-    badge: "/certificate/aws-cloud-quest-cloud-practitioner-training-badge.png",
-    credentialUrl: "/certificate/aws_cloud_quest_cloud.pdf",
+    badge:
+      "/certificate/aws-cloud-quest-cloud-practitioner/aws-cloud-quest-cloud-practitioner-training-badge.png",
+    credentialUrl:
+      "/certificate/aws-cloud-quest-cloud-practitioner/aws-cloud-quest-cloud-practitioner.pdf",
   },
   {
     code: "CLF-C02",

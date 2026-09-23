@@ -47,7 +47,7 @@ export function Hero() {
             LinkedIn →
           </a>
           <a
-            href="/cv-alfredo-dominguez.pdf"
+            href="/cv/alfredo-dominguez-cv-es.pdf"
             download
             className="border border-aws/50 text-aws px-8 py-3 rounded font-semibold hover:bg-aws/10 transition-colors"
           >

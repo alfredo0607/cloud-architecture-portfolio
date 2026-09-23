@@ -5,6 +5,7 @@ import { Projects } from "@/components/Projects";
 import { Certifications } from "@/components/Certifications";
 import { Education } from "@/components/Education";
 import { TechStack } from "@/components/TechStack";
+import { Documents } from "@/components/Documents";
 import { Contact, Footer } from "@/components/Contact";
 
 export default function Home() {
@@ -18,6 +19,7 @@ export default function Home() {
         <Certifications />
         <Education />
         <TechStack />
+        <Documents />
         <Contact />
       </main>
       <Footer />

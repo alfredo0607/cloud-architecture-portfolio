@@ -37,13 +37,19 @@ export function Navbar() {
             Stack
           </a>
           <a
+            href="#documentos"
+            className="hover:text-foreground transition-colors hidden lg:block"
+          >
+            Documentos
+          </a>
+          <a
             href="#contacto"
             className="hover:text-foreground transition-colors hidden md:block"
           >
             Contacto
           </a>
           <a
-            href="/cv-alfredo-dominguez.pdf"
+            href="/cv/alfredo-dominguez-cv-es.pdf"
             download
             className="border border-aws/50 text-aws px-3 py-1 rounded font-semibold hover:bg-aws/10 transition-colors hidden sm:block"
           >
